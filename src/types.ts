@@ -8,6 +8,7 @@ export interface Message {
   content: string;
   toolCalls?: ToolCall[];
   timestamp: Date;
+  isStreaming?: boolean;
 }
 
 export interface ToolCall {

@@ -63,13 +63,14 @@ export function useChat() {
       timestamp: new Date(),
     };
 
-    // Add empty assistant message
+    // Add empty assistant message (streaming)
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
       toolCalls: [],
       timestamp: new Date(),
+      isStreaming: true,
     };
 
     setMessages(prev => [...prev, userMessage, assistantMessage]);
@@ -310,6 +311,7 @@ export function useChat() {
       updateLastMessage({
         content: newAccumulatedContent,
         toolCalls: accumulatedTools,
+        isStreaming: false,
       });
       // Don't save history - every session is fresh
     }

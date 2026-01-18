@@ -4,6 +4,7 @@ import type { Message, ToolCall } from '../types.js';
 import { Markdown } from './Markdown.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+const CURSOR = '▌';
 
 interface DiffLine {
   type: 'context' | 'add' | 'remove';
@@ -31,7 +32,7 @@ const MessageItem = memo(function MessageItem({ message, isLast }: { message: Me
   const hasContent = !isUser && message.content;
 
   return (
-    <Box flexDirection="column" marginBottom={isLast ? 0 : 1}>
+    <Box flexDirection="column" marginBottom={isLast ? 0 : 2}>
       {/* User message */}
       {isUser && (
         <Box>
@@ -40,24 +41,24 @@ const MessageItem = memo(function MessageItem({ message, isLast }: { message: Me
         </Box>
       )}
 
-      {/* Tool calls - compact inline display */}
+      {/* Tool calls */}
       {hasTools && (
-        <Box flexDirection="column">
-          {message.toolCalls!.map((t, i) => <ToolItem key={`${t.id}-${i}`} tool={t} />)}
+        <Box flexDirection="column" marginTop={1}>
+          {message.toolCalls!.map((t, i) => <ToolItem key={`${t.id}-${i}`} tool={t} isFirst={i === 0} />)}
         </Box>
       )}
 
-      {/* Assistant text - with top margin if tools shown */}
+      {/* Assistant text */}
       {hasContent && (
-        <Box marginTop={hasTools ? 1 : 0}>
-          <Markdown>{String(message.content)}</Markdown>
+        <Box marginTop={hasTools ? 2 : 1}>
+          <StreamingText text={String(message.content)} isStreaming={message.isStreaming || false} />
         </Box>
       )}
     </Box>
   );
 });
 
-const ToolItem = memo(function ToolItem({ tool }: { tool: ToolCall }) {
+const ToolItem = memo(function ToolItem({ tool, isFirst }: { tool: ToolCall; isFirst?: boolean }) {
   const [frame, setFrame] = useState(0);
   const startRef = useRef(Date.now());
   const isRunning = tool.status === 'running';
@@ -78,7 +79,7 @@ const ToolItem = memo(function ToolItem({ tool }: { tool: ToolCall }) {
   const diff = tool.status === 'completed' && tool.result?.diff;
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" marginTop={isFirst ? 0 : 1}>
       <Box>
         <Text color={color}>{icon} </Text>
         <Text color="#E0E0E0" bold>{label}</Text>
@@ -87,7 +88,7 @@ const ToolItem = memo(function ToolItem({ tool }: { tool: ToolCall }) {
       {result && !diff && <Box><Text color="#666">  └ </Text><Text color="#808080">{result}</Text></Box>}
       {err && <Box><Text color="#666">  └ </Text><Text color="#E07070">{String(err).slice(0, 80)}</Text></Box>}
       {diff && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" marginTop={1}>
           <Box><Text color="#666">  └ </Text><Text color="#808080">{tool.result!.summary || 'Changes:'}</Text></Box>
           <DiffView diff={diff} file={tool.result!.file} collapsed={diff.length > 6} />
         </Box>
@@ -121,7 +122,7 @@ const DiffView = memo(function DiffView({ diff, file, collapsed }: { diff: DiffL
   const show = collapsed ? diff.slice(0, 4) : diff.slice(0, 20);
   const hidden = collapsed ? diff.length - 4 : Math.max(0, diff.length - 20);
   return (
-    <Box flexDirection="column" marginLeft={4}>
+    <Box flexDirection="column" marginLeft={4} marginTop={1}>
       {file && <Text color="#7B9FBF" dimColor>{file.split('/').pop()}</Text>}
       {show.map((l, i) => {
         const ln = l.lineNum ? String(l.lineNum).padStart(3) + ' ' : '    ';
@@ -130,6 +131,31 @@ const DiffView = memo(function DiffView({ diff, file, collapsed }: { diff: DiffL
         return <Box key={i}><Text color="#666">{ln}  </Text><Text color="#808080">{l.content}</Text></Box>;
       })}
       {hidden > 0 && <Text color="#666" dimColor>  ... {hidden} more</Text>}
+    </Box>
+  );
+});
+
+// Streaming text with cursor - text comes naturally from API stream
+const StreamingText = memo(function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
+  const [showCursor, setShowCursor] = useState(true);
+
+  // Blinking cursor while streaming
+  useEffect(() => {
+    if (!isStreaming) return;
+    const timer = setInterval(() => setShowCursor(v => !v), 530);
+    return () => clearInterval(timer);
+  }, [isStreaming]);
+
+  // When done streaming, render with full markdown formatting
+  if (!isStreaming) {
+    return <Markdown>{text}</Markdown>;
+  }
+
+  // While streaming, show text as-is with blinking cursor
+  return (
+    <Box>
+      <Markdown>{text}</Markdown>
+      {showCursor && <Text color="#7DC87D">{CURSOR}</Text>}
     </Box>
   );
 });
