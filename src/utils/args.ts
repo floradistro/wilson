@@ -23,7 +23,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.dangerouslySkipPermissions = true;
     } else if (!arg.startsWith('-')) {
       // Skip known commands
-      if (!['login', 'logout', 'version'].includes(arg)) {
+      if (!['login', 'logout', 'version', 'update', 'check-updates'].includes(arg)) {
         positional.push(arg);
       }
     }
@@ -44,6 +44,8 @@ Usage:
   wilson                      Start interactive mode
   wilson login                Login to your account
   wilson logout               Clear authentication
+  wilson update               Update to latest version
+  wilson check-updates        Check for available updates
 
 Options:
   -h, --help                  Show this help message

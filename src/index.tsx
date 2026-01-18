@@ -27,6 +27,12 @@ const firstArg = process.argv[2];
 if (firstArg === 'test') {
   const testMessage = process.argv.slice(3).join(' ') || 'list the files in the current directory';
   import('./utils/headless-test.js').then(mod => mod.runHeadlessTest(testMessage)).catch(console.error);
+} else if (firstArg === 'update') {
+  // Handle update command directly
+  import('./commands/update.js').then(mod => mod.updateCommand()).catch(console.error);
+} else if (firstArg === 'check-updates') {
+  // Handle check-updates command directly
+  import('./commands/update.js').then(mod => mod.checkUpdatesCommand()).catch(console.error);
 } else {
   // Normal mode - determine command and render the app
   let command: string | undefined;

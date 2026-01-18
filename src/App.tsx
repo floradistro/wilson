@@ -98,6 +98,18 @@ export function App({ initialQuery, flags, command }: AppProps) {
     }
   }, [command, logout, exit]);
 
+  // Auto-check for updates on startup
+  useEffect(() => {
+    if (isAuthenticated && isInitialized && !command) {
+      // Only check for updates in normal interactive mode
+      import('../services/updater.js').then(({ updater }) => {
+        updater.autoUpdate().catch(() => {
+          // Silently ignore update check failures
+        });
+      });
+    }
+  }, [isAuthenticated, isInitialized, command]);
+
   // Tool callbacks
   const toolCallbacks = {
     onAskUser: handleAskUser,
