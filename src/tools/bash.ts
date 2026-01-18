@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { Tool, ToolResult } from '../types.js';
 import { BashSchema } from './schemas.js';
 import { checkDangerousCommand } from '../utils/safety.js';
+import { getSupabaseEnv } from './env.js';
 
 interface BashParams {
   command: string;
@@ -68,10 +69,14 @@ function isLongRunning(command: string): boolean {
 // Run a command in background and return immediately
 function runInBackground(command: string, cwd: string): Promise<ToolResult> {
   return new Promise((resolve) => {
+    // Inject Wilson/Supabase credentials into child process
+    const supabaseEnv = getSupabaseEnv();
+
     const child = spawn('bash', ['-c', command], {
       cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
+      env: { ...process.env, ...supabaseEnv },
     });
 
     const pid = child.pid!;
@@ -178,11 +183,15 @@ export const bashTool: Tool = {
     return new Promise((resolve) => {
       let resolved = false;
 
+      // Inject Wilson/Supabase credentials into child process
+      const supabaseEnv = getSupabaseEnv();
+
       const child: ChildProcess = spawn('bash', ['-c', command], {
         cwd,
         stdio: ['pipe', 'pipe', 'pipe'],
         // Kill entire process group on termination
         detached: false,
+        env: { ...process.env, ...supabaseEnv },
       });
 
       // Close stdin immediately to prevent commands waiting for input

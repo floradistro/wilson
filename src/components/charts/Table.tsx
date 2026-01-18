@@ -4,65 +4,36 @@ interface TableProps {
   title?: string;
   headers: string[];
   rows: (string | number)[][];
-  maxRows?: number;
 }
 
-export function Table({ title, headers, rows, maxRows = 10 }: TableProps) {
-  if (!headers || !rows || rows.length === 0) {
-    return <Text dimColor>No data</Text>;
-  }
+/**
+ * Simple text table - Claude Code style
+ */
+export function Table({ title, headers, rows }: TableProps) {
+  if (!headers || !rows || rows.length === 0) return null;
 
-  // Calculate column widths
-  const columnWidths = headers.map((header, i) => {
-    const headerWidth = header.length;
-    const maxDataWidth = Math.max(...rows.map((row) => String(row[i] || '').length));
-    return Math.max(headerWidth, maxDataWidth, 4);
-  });
-
-  const displayRows = rows.slice(0, maxRows);
-  const totalWidth = columnWidths.reduce((sum, w) => sum + w + 3, 0);
+  const widths = headers.map((h, i) =>
+    Math.max(h.length, ...rows.map(r => String(r[i] || '').length))
+  );
 
   return (
     <Box flexDirection="column">
-      {title && (
-        <>
-          <Text bold color="white">{title}</Text>
-          <Text dimColor>{'─'.repeat(totalWidth)}</Text>
-        </>
-      )}
-
-      {/* Headers */}
-      <Box>
-        <Text>  </Text>
-        {headers.map((header, i) => (
-          <Box key={i} width={columnWidths[i] + 3}>
-            <Text bold>{header}</Text>
-          </Box>
+      {title && <Text color="#888">{title}</Text>}
+      <Text>
+        {headers.map((h, i) => (
+          <Text key={i} color="#888">{h.padEnd(widths[i] + 2)}</Text>
         ))}
-      </Box>
-
-      {/* Rows */}
-      {displayRows.map((row, rowIndex) => (
-        <Box key={rowIndex}>
-          <Text>  </Text>
-          {row.map((cell, i) => {
-            const value = String(cell || '');
-            const color = value.startsWith('$') ? 'green'
-              : value.startsWith('-') ? 'red'
-              : undefined;
-
-            return (
-              <Box key={i} width={columnWidths[i] + 3}>
-                <Text color={color}>{value}</Text>
-              </Box>
-            );
+      </Text>
+      {rows.slice(0, 10).map((row, ri) => (
+        <Text key={ri}>
+          {row.map((cell, ci) => {
+            const v = String(cell || '');
+            const color = v.startsWith('$') ? '#7DC87D' : v.startsWith('-') ? '#E07070' : '#E8E8E8';
+            return <Text key={ci} color={color}>{v.padEnd(widths[ci] + 2)}</Text>;
           })}
-        </Box>
+        </Text>
       ))}
-
-      {rows.length > maxRows && (
-        <Text dimColor>  +{rows.length - maxRows} more</Text>
-      )}
+      {rows.length > 10 && <Text color="#555">+{rows.length - 10} more</Text>}
     </Box>
   );
 }

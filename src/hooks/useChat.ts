@@ -1,10 +1,33 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
-import type { Message, ToolCall, Todo, PendingQuestion, PendingPermission } from '../types.js';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import type { Message, ToolCall, ToolData, Todo, PendingQuestion, PendingPermission } from '../types.js';
 import { useStream, type StreamEvent } from './useStream.js';
 import { useTools } from './useTools.js';
 import { sendChatRequest } from '../services/api.js';
 import { compactConversation } from '../utils/context.js';
 import { log } from '../utils/logger.js';
+
+// Throttle function for streaming updates
+function createThrottle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
+  let lastCall = 0;
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  let lastArgs: Parameters<T> | null = null;
+
+  return ((...args: Parameters<T>) => {
+    const now = Date.now();
+    lastArgs = args;
+
+    if (now - lastCall >= ms) {
+      lastCall = now;
+      fn(...args);
+    } else if (!timeout) {
+      timeout = setTimeout(() => {
+        timeout = null;
+        lastCall = Date.now();
+        if (lastArgs) fn(...lastArgs);
+      }, ms - (now - lastCall));
+    }
+  }) as T;
+}
 
 interface ToolCallbacks {
   onAskUser?: (question: PendingQuestion) => Promise<string>;
@@ -159,12 +182,21 @@ export function useChat() {
 
     // Track state for this iteration
     let iterationText = '';
+    let charCount = 0;
     let pendingTools: StreamEvent['pendingTools'] = undefined;
     // CRITICAL: This must be the raw content blocks array from backend
     let assistantContentFromBackend: unknown[] | undefined = undefined;
     // Loop tracking from backend
     let backendToolCallCount: number | undefined = undefined;
     let backendLoopDepth: number | undefined = undefined;
+    // Structured data from tool results (for rendering charts/tables)
+    const toolDataResults: ToolData[] = [];
+
+    // Throttled update for streaming text (100ms) - reduces terminal thrashing
+    const throttledUpdate = createThrottle((text: string, chars: number) => {
+      setStreamingChars(chars);
+      updateLastMessage({ content: text });
+    }, 100);
 
     // Process stream
     for await (const event of processStream(response)) {
@@ -172,19 +204,33 @@ export function useChat() {
         case 'text':
           if (event.text) {
             iterationText += event.text;
-            // Update live character count for footer
-            setStreamingChars(prev => prev + event.text!.length);
-            // Update message content directly
+            charCount += event.text.length;
+            // Throttled updates to reduce render frequency
             const displayText = accumulatedContent
               ? accumulatedContent + '\n\n' + iterationText
               : iterationText;
-            updateLastMessage({ content: displayText });
+            throttledUpdate(displayText, charCount);
           }
           break;
 
         case 'tool':
           // Skip individual tool events - we get complete tool info from tools_pending
           // This avoids duplicates with missing names
+          break;
+
+        case 'tool_result':
+          // Capture structured data from backend tool execution
+          // This is the KEY event for rendering charts/tables from real data
+          if (event.toolResult) {
+            toolDataResults.push({
+              toolName: event.toolResult.name,
+              toolId: event.toolResult.id,
+              data: event.toolResult.result,
+              elapsed_ms: event.toolResult.elapsed_ms,
+              isError: event.toolResult.isError,
+            });
+            updateLastMessage({ toolData: [...toolDataResults] });
+          }
           break;
 
         case 'tools_pending':
@@ -200,7 +246,7 @@ export function useChat() {
             const textFromBlocks = (assistantContentFromBackend as Array<{type?: string; text?: string}>)
               .filter(block => block.type === 'text' && block.text)
               .map(block => block.text)
-              .join('');
+              .join('\n\n');
             if (textFromBlocks) {
               iterationText = textFromBlocks;
             }
@@ -224,6 +270,13 @@ export function useChat() {
           break;
       }
     }
+
+    // Final flush of any pending throttled updates
+    const finalDisplayText = accumulatedContent
+      ? accumulatedContent + '\n\n' + iterationText
+      : iterationText;
+    setStreamingChars(charCount);
+    updateLastMessage({ content: finalDisplayText });
 
     // Calculate new accumulated state
     const newAccumulatedContent = accumulatedContent
@@ -315,6 +368,7 @@ export function useChat() {
       updateLastMessage({
         content: newAccumulatedContent,
         toolCalls: accumulatedTools,
+        toolData: toolDataResults.length > 0 ? toolDataResults : undefined,
         isStreaming: false,
       });
       // Don't save history - every session is fresh

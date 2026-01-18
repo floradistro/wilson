@@ -2,7 +2,8 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { config } from '../config.js';
 import { getToolSchemas } from '../tools/index.js';
-import type { StoreInfo } from '../types.js';
+import { getMcpClient } from './mcp.js';
+import type { StoreInfo, ToolSchema } from '../types.js';
 
 // =============================================================================
 // API Client
@@ -34,21 +35,42 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   // Read project context if available
   const projectContext = getProjectContext();
 
+  // Only send local tools - backend already has MCP tools
+  const localTools = getToolSchemas();
+
   const body = {
     message,
-    // Send full conversation history - backend passes directly to Claude
-    conversation_messages: conversationHistory,
+    // Send full conversation history - backend expects 'history' not 'conversation_messages'
+    history: conversationHistory,
     store_id: storeId,
     working_directory: process.cwd(),
     platform: process.platform,
     client: 'cli',
     format_hint: 'terminal',
-    local_tools: getToolSchemas(),
+    local_tools: localTools,
     // Loop tracking - backend uses these to enforce limits
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,
     project_context: projectContext,
-    style_instructions: 'Keep responses concise for terminal display. Use markdown formatting.',
+    style_instructions: `Terminal CLI. STRICT FORMAT RULES:
+
+NEVER USE: ** markers, emojis, "interactive charts", "visualization"
+
+METRICS (for data summaries):
+Summary:
+- Revenue: $123,456
+- Orders: 1,234
+- Avg Order: $50.29
+
+TABLES (for comparisons):
+| Period | Revenue |
+|--------|---------|
+| Today  | $50,000 |
+
+RULES:
+1. Bullet values = number ONLY
+2. No bold **, no decorations
+3. Plain text only`,
   };
 
   // Create abort controller for timeout
@@ -196,6 +218,46 @@ export async function refreshAccessToken(
 // =============================================================================
 // Helpers
 // =============================================================================
+
+// Cache MCP tools to avoid blocking on every request
+let cachedMcpTools: ToolSchema[] | null = null;
+
+/**
+ * Pre-fetch MCP tools into cache. Call this after MCP client is initialized.
+ */
+export async function prefetchMcpTools(): Promise<void> {
+  const mcp = getMcpClient();
+  if (mcp && !cachedMcpTools) {
+    try {
+      cachedMcpTools = await mcp.getToolSchemas();
+    } catch {
+      // MCP failed, will use local tools only
+    }
+  }
+}
+
+/**
+ * Get all tool schemas - local tools plus cached MCP tools (deduplicated).
+ */
+function getAllToolSchemas(): ToolSchema[] {
+  const localTools = getToolSchemas();
+
+  // Return cached MCP tools if available
+  if (cachedMcpTools) {
+    // Deduplicate by name - local tools take priority, then first occurrence of MCP tools
+    const seenNames = new Set(localTools.map(t => t.name));
+    const uniqueMcpTools: ToolSchema[] = [];
+    for (const tool of cachedMcpTools) {
+      if (!seenNames.has(tool.name)) {
+        seenNames.add(tool.name);
+        uniqueMcpTools.push(tool);
+      }
+    }
+    return [...localTools, ...uniqueMcpTools];
+  }
+
+  return localTools;
+}
 
 function getProjectContext(): string | undefined {
   const cwd = process.cwd();

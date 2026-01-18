@@ -6,9 +6,10 @@ import { Login } from './components/Login.js';
 import { TodoList } from './components/TodoList.js';
 import { AskUserPrompt } from './components/AskUserPrompt.js';
 import { PermissionPrompt } from './components/PermissionPrompt.js';
+import { StoreSelector } from './components/StoreSelector.js';
 import { Footer } from './components/Footer.js';
 import { useChat } from './hooks/useChat.js';
-import { useAuth } from './hooks/useAuth.js';
+import { useAuthStore } from './hooks/useAuthStore.js';
 import { config } from './config.js';
 import type { Flags, PendingQuestion, PendingPermission } from './types.js';
 
@@ -25,13 +26,20 @@ export function App({ initialQuery, flags, command }: AppProps) {
   const {
     isAuthenticated,
     isLoading: authLoading,
+    isInitialized,
     accessToken,
     storeId,
     storeName,
     user,
-    login,
     logout,
-  } = useAuth();
+    stores,
+    locations,
+    currentLocation,
+    switchStore,
+    setLocation,
+    refreshStores,
+  } = useAuthStore();
+
   const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, streamingChars, sendMessage, clearMessages, clearError } = useChat();
   const [inputValue, setInputValue] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
@@ -41,6 +49,9 @@ export function App({ initialQuery, flags, command }: AppProps) {
   // State for interactive prompts
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null);
+
+  // State for store/location selector
+  const [selectorMode, setSelectorMode] = useState<'store' | 'location' | null>(null);
   const questionResolverRef = useRef<((answer: string) => void) | null>(null);
   const permissionResolverRef = useRef<((allowed: boolean) => void) | null>(null);
 
@@ -102,6 +113,38 @@ export function App({ initialQuery, flags, command }: AppProps) {
     }
   }, [initialQuery, isAuthenticated, accessToken, storeId, isStreaming, initialQuerySent]);
 
+  // Handle keyboard shortcuts - MUST be called before any conditional returns
+  useInput((input, key) => {
+    // Only handle input when authenticated and in chat mode
+    if (!isAuthenticated) return;
+
+    if (key.ctrl && input === 'c') {
+      exit();
+      return;
+    }
+
+    if (key.ctrl && input === 'l') {
+      clearMessages();
+      setStatusMessage('Conversation cleared');
+      setTimeout(() => setStatusMessage(null), 2000);
+      return;
+    }
+
+    if (key.escape) {
+      if (viewMode !== 'chat') {
+        setViewMode('chat');
+        return;
+      }
+      if (error) clearError();
+      if (statusMessage) setStatusMessage(null);
+      return;
+    }
+
+    if (input === '?' && !isStreaming && inputValue === '') {
+      setViewMode(viewMode === 'help' ? 'chat' : 'help');
+    }
+  });
+
   // Handle slash commands
   const handleSlashCommand = (cmd: string): boolean => {
     const lower = cmd.toLowerCase().trim();
@@ -130,6 +173,36 @@ export function App({ initialQuery, flags, command }: AppProps) {
         exit();
         return true;
 
+      case '/stores':
+      case '/store':
+        if (stores.length <= 1) {
+          setStatusMessage('Only one store available');
+          setTimeout(() => setStatusMessage(null), 2000);
+        } else {
+          setSelectorMode('store');
+        }
+        return true;
+
+      case '/locations':
+      case '/location':
+      case '/loc':
+        if (locations.length === 0) {
+          setStatusMessage('No locations available for this store');
+          setTimeout(() => setStatusMessage(null), 2000);
+        } else {
+          setSelectorMode('location');
+        }
+        return true;
+
+      case '/refresh':
+      case '/sync':
+        setStatusMessage('Refreshing stores...');
+        refreshStores().then(() => {
+          setStatusMessage(`Synced: ${stores.length} stores`);
+          setTimeout(() => setStatusMessage(null), 2000);
+        });
+        return true;
+
       case '/context':
       case '/ctx': {
         const pct = ((contextTokens / 200000) * 100).toFixed(1);
@@ -152,37 +225,8 @@ export function App({ initialQuery, flags, command }: AppProps) {
     }
   };
 
-  // Handle keyboard shortcuts
-  useInput((input, key) => {
-    if (key.ctrl && input === 'c') {
-      exit();
-      return;
-    }
-
-    if (key.ctrl && input === 'l') {
-      clearMessages();
-      setStatusMessage('Conversation cleared');
-      setTimeout(() => setStatusMessage(null), 2000);
-      return;
-    }
-
-    if (key.escape) {
-      if (viewMode !== 'chat') {
-        setViewMode('chat');
-        return;
-      }
-      if (error) clearError();
-      if (statusMessage) setStatusMessage(null);
-      return;
-    }
-
-    if (input === '?' && !isStreaming && inputValue === '') {
-      setViewMode(viewMode === 'help' ? 'chat' : 'help');
-    }
-  });
-
-  // Loading state
-  if (authLoading) {
+  // Loading state - wait for auth store to initialize
+  if (!isInitialized || authLoading) {
     return (
       <Box padding={1}>
         <Spinner label="Loading..." />
@@ -190,15 +234,9 @@ export function App({ initialQuery, flags, command }: AppProps) {
     );
   }
 
-  // Login flow
+  // Login flow - show login if not authenticated
   if (!isAuthenticated && command !== 'logout') {
-    return (
-      <Login
-        onLogin={(accessToken, refreshToken, expiresAt, user, storeInfo) => {
-          login(accessToken, refreshToken, expiresAt, user, storeInfo);
-        }}
-      />
-    );
+    return <Login onSuccess={() => {}} />;
   }
 
   // Help screen
@@ -213,13 +251,16 @@ export function App({ initialQuery, flags, command }: AppProps) {
         <Box flexDirection="column">
           <Text bold color="white">Slash Commands</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>  <Text color="green">/new</Text>      <Text dimColor>Start fresh conversation</Text></Text>
-            <Text>  <Text color="green">/clear</Text>    <Text dimColor>Clear screen</Text></Text>
-            <Text>  <Text color="green">/context</Text>  <Text dimColor>Show context window usage</Text></Text>
-            <Text>  <Text color="green">/tokens</Text>   <Text dimColor>Show token usage and cost</Text></Text>
-            <Text>  <Text color="green">/status</Text>   <Text dimColor>View connection status</Text></Text>
-            <Text>  <Text color="green">/help</Text>     <Text dimColor>Show this help</Text></Text>
-            <Text>  <Text color="green">/logout</Text>   <Text dimColor>Sign out</Text></Text>
+            <Text>  <Text color="green">/new</Text>       <Text dimColor>Start fresh conversation</Text></Text>
+            <Text>  <Text color="green">/clear</Text>     <Text dimColor>Clear screen</Text></Text>
+            <Text>  <Text color="green">/stores</Text>    <Text dimColor>Switch store</Text></Text>
+            <Text>  <Text color="green">/location</Text>  <Text dimColor>Switch location</Text></Text>
+            <Text>  <Text color="green">/refresh</Text>   <Text dimColor>Sync stores from server</Text></Text>
+            <Text>  <Text color="green">/context</Text>   <Text dimColor>Show context window usage</Text></Text>
+            <Text>  <Text color="green">/tokens</Text>    <Text dimColor>Show token usage and cost</Text></Text>
+            <Text>  <Text color="green">/status</Text>    <Text dimColor>View connection status</Text></Text>
+            <Text>  <Text color="green">/help</Text>      <Text dimColor>Show this help</Text></Text>
+            <Text>  <Text color="green">/logout</Text>    <Text dimColor>Sign out</Text></Text>
           </Box>
         </Box>
 
@@ -263,7 +304,14 @@ export function App({ initialQuery, flags, command }: AppProps) {
           <Box>
             <Text dimColor>{'Store     '}</Text>
             <Text color="white">{storeName || 'Unknown'}</Text>
+            {stores.length > 1 && <Text dimColor> ({stores.length} stores)</Text>}
           </Box>
+          {currentLocation && (
+            <Box>
+              <Text dimColor>{'Location  '}</Text>
+              <Text color="white">{currentLocation.name}</Text>
+            </Box>
+          )}
           <Box>
             <Text dimColor>{'Account   '}</Text>
             <Text color="white">{user?.email || 'Unknown'}</Text>
@@ -328,6 +376,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
         <Text bold color="#7DC87D">wilson</Text>
         <Text color="#444444"> v{config.version}</Text>
         {storeName && <Text color="#444444"> • {storeName}</Text>}
+        {currentLocation && <Text color="#555555"> @ {currentLocation.name}</Text>}
       </Box>
 
       {/* Status message */}
@@ -377,8 +426,37 @@ export function App({ initialQuery, flags, command }: AppProps) {
         </Box>
       )}
 
+      {/* Store/Location Selector */}
+      {selectorMode && (
+        <Box paddingX={1}>
+          <StoreSelector
+            mode={selectorMode}
+            stores={stores}
+            locations={locations}
+            currentStoreId={storeId}
+            currentLocationId={currentLocation?.id || null}
+            onSelectStore={async (newStoreId) => {
+              const success = await switchStore(newStoreId);
+              if (success) {
+                setStatusMessage(`Switched to ${stores.find(s => s.storeId === newStoreId)?.storeName}`);
+                setTimeout(() => setStatusMessage(null), 2000);
+              }
+              setSelectorMode(null);
+            }}
+            onSelectLocation={(locationId) => {
+              setLocation(locationId);
+              const loc = locations.find(l => l.id === locationId);
+              setStatusMessage(loc ? `Location: ${loc.name}` : 'Location cleared');
+              setTimeout(() => setStatusMessage(null), 2000);
+              setSelectorMode(null);
+            }}
+            onCancel={() => setSelectorMode(null)}
+          />
+        </Box>
+      )}
+
       {/* Footer - edge to edge */}
-      {!pendingQuestion && !pendingPermission && (
+      {!pendingQuestion && !pendingPermission && !selectorMode && (
         <Footer
           inputValue={inputValue}
           onInputChange={setInputValue}

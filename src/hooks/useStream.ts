@@ -2,12 +2,20 @@ import { useCallback } from 'react';
 
 // Simplified stream event types
 export interface StreamEvent {
-  type: 'text' | 'tool' | 'tools_pending' | 'usage' | 'error' | 'done';
+  type: 'text' | 'tool' | 'tool_result' | 'tools_pending' | 'usage' | 'error' | 'done';
   text?: string;
   tool?: {
     id: string;
     name: string;
     input: Record<string, unknown>;
+  };
+  // STRUCTURED TOOL RESULT - contains the actual data for rendering charts/tables
+  toolResult?: {
+    id: string;
+    name: string;
+    result: unknown; // Parsed JSON data from tool execution
+    elapsed_ms?: number;
+    isError?: boolean;
   };
   pendingTools?: Array<{
     id: string;
@@ -158,6 +166,35 @@ function normalize(raw: Record<string, unknown>): StreamEvent | null {
       assistantContent,
       toolCallCount,
       loopDepth,
+    };
+  }
+
+  // TOOL RESULT - structured data from backend tool execution
+  // This is the key event for rendering charts/tables from real data
+  if (type === 'tool_result' || type === 'tool_error') {
+    const isError = type === 'tool_error';
+    let parsedResult: unknown = null;
+
+    // Parse the result JSON if it's a string
+    const resultStr = raw.result as string | undefined;
+    if (resultStr) {
+      try {
+        parsedResult = JSON.parse(resultStr);
+      } catch {
+        // Not JSON, use raw string
+        parsedResult = resultStr;
+      }
+    }
+
+    return {
+      type: 'tool_result',
+      toolResult: {
+        id: String(raw.tool_id || raw.id || ''),
+        name: String(raw.tool_name || raw.name || ''),
+        result: parsedResult,
+        elapsed_ms: typeof raw.elapsed_ms === 'number' ? raw.elapsed_ms : undefined,
+        isError,
+      },
     };
   }
 

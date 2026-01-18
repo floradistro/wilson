@@ -1,5 +1,7 @@
 import { useCallback, useRef } from 'react';
 import { tools, executeToolByName } from '../tools/index.js';
+import { getMcpClient, isRemoteTool } from '../services/mcp.js';
+import { checkDangerousCommand } from '../utils/safety.js';
 import type { ToolResult, Todo, PendingQuestion, PendingPermission } from '../types.js';
 
 interface PendingTool {
@@ -25,26 +27,12 @@ interface UseToolsReturn {
   availableTools: typeof tools;
 }
 
-// Dangerous operation patterns
-const DANGEROUS_PATTERNS = [
-  { pattern: /\brm\s+(-rf?|--force|-r)\s/i, desc: 'recursive/forced delete' },
-  { pattern: /\brm\s+.*\*/i, desc: 'wildcard delete' },
-  { pattern: /\bDROP\s+(TABLE|DATABASE|INDEX|VIEW)/i, desc: 'DROP statement' },
-  { pattern: /\bTRUNCATE\s+TABLE/i, desc: 'TRUNCATE statement' },
-  { pattern: /\bDELETE\s+FROM\s+\w+\s*(;|$)/i, desc: 'DELETE without WHERE' },
-  { pattern: /\bgit\s+push\s+.*--force/i, desc: 'force push' },
-  { pattern: /\bgit\s+reset\s+--hard/i, desc: 'hard reset' },
-  { pattern: /\bsudo\s/i, desc: 'sudo command' },
-  { pattern: /\bchmod\s+777/i, desc: 'chmod 777' },
-];
-
+// Use centralized safety check - returns description if dangerous, null if safe
 function checkDangerous(command: string): { isDangerous: boolean; operation: string } {
-  for (const { pattern, desc } of DANGEROUS_PATTERNS) {
-    if (pattern.test(command)) {
-      return { isDangerous: true, operation: desc };
-    }
-  }
-  return { isDangerous: false, operation: '' };
+  const danger = checkDangerousCommand(command);
+  return danger
+    ? { isDangerous: true, operation: danger }
+    : { isDangerous: false, operation: '' };
 }
 
 export function useTools(): UseToolsReturn {
@@ -122,12 +110,52 @@ export function useTools(): UseToolsReturn {
           }
         }
 
-        // Regular tool execution
-        const result = await executeToolByName(tool.name, tool.input);
-        results.push({
-          tool_use_id: tool.id,
-          content: JSON.stringify(result),
-        });
+        // Check if this is a remote tool (MCP) or local tool
+        if (isRemoteTool(tool.name)) {
+          // Execute via MCP (Whale data tools)
+          const mcp = getMcpClient();
+          if (mcp) {
+            try {
+              const mcpResult = await mcp.callTool(tool.name, tool.input);
+              // Parse and preserve structured data if it's JSON
+              let resultData: unknown = mcpResult;
+              if (typeof mcpResult === 'string') {
+                try {
+                  resultData = JSON.parse(mcpResult);
+                } catch {
+                  // Keep as string if not valid JSON
+                }
+              }
+              results.push({
+                tool_use_id: tool.id,
+                content: JSON.stringify({ success: true, ...spreadData(resultData) }),
+              });
+            } catch (mcpError) {
+              results.push({
+                tool_use_id: tool.id,
+                content: JSON.stringify({
+                  success: false,
+                  error: mcpError instanceof Error ? mcpError.message : 'MCP tool execution failed',
+                }),
+              });
+            }
+          } else {
+            results.push({
+              tool_use_id: tool.id,
+              content: JSON.stringify({
+                success: false,
+                error: 'MCP client not initialized. Remote tools unavailable.',
+              }),
+            });
+          }
+        } else {
+          // Execute locally (file system tools)
+          const result = await executeToolByName(tool.name, tool.input);
+          results.push({
+            tool_use_id: tool.id,
+            content: JSON.stringify(result),
+          });
+        }
       } catch (error) {
         const errorResult: ToolResult = {
           success: false,
@@ -147,4 +175,20 @@ export function useTools(): UseToolsReturn {
     executeTools,
     availableTools: tools,
   };
+}
+
+// Helper to spread data object into result, preserving structure for charts
+function spreadData(data: unknown): Record<string, unknown> {
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    // If it has query_type, spread the whole thing (analytics result)
+    const obj = data as Record<string, unknown>;
+    if (obj.query_type || obj.data) {
+      return obj;
+    }
+    return { data };
+  }
+  if (Array.isArray(data)) {
+    return { data };
+  }
+  return { data: String(data) };
 }

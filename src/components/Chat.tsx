@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef, memo } from 'react';
-import { Box, Text } from 'ink';
+import { useState, useEffect, useRef, memo, useMemo } from 'react';
+import { Box, Text, Static } from 'ink';
 import { highlight } from 'cli-highlight';
 import chalk from 'chalk';
-import type { Message, ToolCall } from '../types.js';
+import type { Message, ToolCall, ToolData } from '../types.js';
 import { Markdown } from './Markdown.js';
+import { ChartRenderer, hasChartData } from './charts/ChartRenderer.js';
 
 const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const CURSOR = '▋';
 
 // Syntax highlighting theme
 const theme = {
@@ -34,10 +34,43 @@ interface ChatProps {
 
 export const Chat = memo(function Chat({ messages }: ChatProps) {
   if (!messages.length) return null;
+
+  // Split messages: static (completed) vs dynamic (streaming/last)
+  const { staticMessages, dynamicMessages } = useMemo(() => {
+    // All messages except the last assistant message go to static
+    // The last message (if streaming or assistant) stays dynamic
+    const lastIdx = messages.length - 1;
+    const lastMsg = messages[lastIdx];
+
+    // If last message is streaming, keep it dynamic
+    if (lastMsg?.isStreaming) {
+      return {
+        staticMessages: messages.slice(0, -1),
+        dynamicMessages: [lastMsg],
+      };
+    }
+
+    // Otherwise all messages are static (fully rendered)
+    return {
+      staticMessages: messages,
+      dynamicMessages: [],
+    };
+  }, [messages]);
+
   return (
     <Box flexDirection="column">
-      {messages.map((m, i) => (
-        <MessageItem key={m.id} message={m} isLast={i === messages.length - 1} />
+      {/* Static messages - rendered once, never re-render */}
+      {staticMessages.length > 0 && (
+        <Static items={staticMessages}>
+          {(m, i) => (
+            <MessageItem key={m.id} message={m} isLast={false} />
+          )}
+        </Static>
+      )}
+
+      {/* Dynamic message - the one currently streaming */}
+      {dynamicMessages.map((m) => (
+        <MessageItem key={m.id} message={m} isLast={true} />
       ))}
     </Box>
   );
@@ -46,7 +79,16 @@ export const Chat = memo(function Chat({ messages }: ChatProps) {
 const MessageItem = memo(function MessageItem({ message, isLast }: { message: Message; isLast?: boolean }) {
   const isUser = message.role === 'user';
   const hasTools = !isUser && message.toolCalls && message.toolCalls.length > 0;
-  const hasContent = !isUser && message.content && message.content.trim();
+
+  // Get first chart data only (dedupe by taking first)
+  const chartData = useMemo(() => {
+    if (!message.toolData?.length) return null;
+    const first = message.toolData.find(td => hasChartData(td.data));
+    return first ? first.data : null;
+  }, [message.toolData]);
+
+  // Only show text if NO chart (chart replaces verbose text)
+  const showText = !isUser && message.content?.trim() && !chartData;
 
   return (
     <Box flexDirection="column" marginBottom={isLast ? 0 : 2}>
@@ -58,7 +100,7 @@ const MessageItem = memo(function MessageItem({ message, isLast }: { message: Me
         </Box>
       )}
 
-      {/* Tool calls */}
+      {/* Tool status */}
       {hasTools && (
         <Box flexDirection="column" marginLeft={2}>
           {message.toolCalls!.map((t, i) => (
@@ -67,10 +109,17 @@ const MessageItem = memo(function MessageItem({ message, isLast }: { message: Me
         </Box>
       )}
 
-      {/* Assistant text */}
-      {hasContent && (
+      {/* Single chart from tool result */}
+      {chartData && (
+        <Box marginLeft={2} marginTop={hasTools ? 1 : 0}>
+          <ChartRenderer data={chartData} />
+        </Box>
+      )}
+
+      {/* Assistant text - only if no chart */}
+      {showText && (
         <Box marginTop={hasTools ? 1 : 0} marginLeft={2}>
-          <StreamingText text={String(message.content)} isStreaming={message.isStreaming || false} />
+          <StreamingText text={String(message.content)} isStreaming={message.isStreaming || false} skipMetrics={true} />
         </Box>
       )}
     </Box>
@@ -85,7 +134,7 @@ const ToolItem = memo(function ToolItem({ tool, isFirst }: { tool: ToolCall; isF
   useEffect(() => {
     if (!isRunning) return;
     startRef.current = Date.now();
-    const id = setInterval(() => setFrame(f => (f + 1) % SPINNER.length), 80);
+    const id = setInterval(() => setFrame(f => (f + 1) % SPINNER.length), 120);
     return () => clearInterval(id);
   }, [isRunning]);
 
@@ -135,6 +184,44 @@ const ToolItem = memo(function ToolItem({ tool, isFirst }: { tool: ToolCall; isF
       {diff && (
         <Box marginLeft={2} marginTop={1}>
           <DiffView diff={diff} file={tool.result!.file} summary={tool.result!.summary} collapsed={diff.length > 8} />
+        </Box>
+      )}
+    </Box>
+  );
+});
+
+// Backend tool data item - renders charts/tables from structured results
+const ToolDataItem = memo(function ToolDataItem({ toolData, isFirst }: { toolData: ToolData; isFirst?: boolean }) {
+  const { toolName, data, elapsed_ms, isError } = toolData;
+
+  // Check if data has chart-renderable content
+  const chartable = data && hasChartData(data);
+
+  // Format tool name for display
+  const label = toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+
+  return (
+    <Box flexDirection="column" marginTop={isFirst ? 0 : 1}>
+      {/* Header for backend tool result */}
+      <Box>
+        <Text color={isError ? '#E07070' : '#7DC87D'}>
+          {isError ? '✗' : '◆'}{' '}
+        </Text>
+        <Text color="#82AAFF">{label}</Text>
+        {elapsed_ms && <Text color="#555"> {(elapsed_ms / 1000).toFixed(1)}s</Text>}
+      </Box>
+
+      {/* Render chart if data supports it */}
+      {chartable && (
+        <Box marginLeft={2} marginTop={1}>
+          <ChartRenderer data={data} fallbackTitle={label} />
+        </Box>
+      )}
+
+      {/* Error display */}
+      {isError && typeof data === 'string' && (
+        <Box marginLeft={2} marginTop={1}>
+          <Text color="#E07070">{String(data).slice(0, 300)}</Text>
         </Box>
       )}
     </Box>
@@ -375,24 +462,11 @@ const DiffView = memo(function DiffView({
   );
 });
 
-// Streaming text with cursor
-const StreamingText = memo(function StreamingText({ text, isStreaming }: { text: string; isStreaming: boolean }) {
-  const [showCursor, setShowCursor] = useState(true);
-
-  useEffect(() => {
-    if (!isStreaming) return;
-    const timer = setInterval(() => setShowCursor(v => !v), 530);
-    return () => clearInterval(timer);
-  }, [isStreaming]);
-
-  if (!isStreaming) {
-    return <Markdown>{text}</Markdown>;
-  }
-
+// Streaming text with real-time markdown rendering
+const StreamingText = memo(function StreamingText({ text, isStreaming, skipMetrics }: { text: string; isStreaming: boolean; skipMetrics?: boolean }) {
   return (
-    <Box>
-      <Markdown>{text}</Markdown>
-      {showCursor && <Text color="#7DC87D">{CURSOR}</Text>}
+    <Box flexDirection="column">
+      <Markdown streaming={isStreaming} skipMetrics={skipMetrics}>{text}</Markdown>
     </Box>
   );
 });

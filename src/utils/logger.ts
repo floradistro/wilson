@@ -109,3 +109,83 @@ export function logTool(name: string, status: 'start' | 'success' | 'error', dur
     log.debug(`Tool ${name} ${status}`, { duration });
   }
 }
+
+// =============================================================================
+// Audit Logging - Security-relevant events always logged
+// =============================================================================
+
+const AUDIT_FILE = join(LOG_DIR, 'audit.log');
+
+/**
+ * Write audit entry - always written regardless of log level
+ */
+function writeAudit(event: string, data: Record<string, unknown>) {
+  try {
+    ensureLogDir();
+    const entry = {
+      timestamp: new Date().toISOString(),
+      event,
+      ...sanitizeAuditData(data),
+    };
+    appendFileSync(AUDIT_FILE, JSON.stringify(entry) + '\n');
+  } catch {
+    // Silent fail
+  }
+}
+
+/**
+ * Remove sensitive data before audit logging
+ */
+function sanitizeAuditData(data: Record<string, unknown>): Record<string, unknown> {
+  const sensitiveKeys = ['password', 'token', 'key', 'secret', 'credential', 'apikey'];
+  const sanitized: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(data)) {
+    const isSecret = sensitiveKeys.some(s => key.toLowerCase().includes(s));
+    if (isSecret) {
+      sanitized[key] = '[REDACTED]';
+    } else if (typeof value === 'object' && value !== null) {
+      sanitized[key] = sanitizeAuditData(value as Record<string, unknown>);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+
+  return sanitized;
+}
+
+/**
+ * Audit log for tool executions
+ */
+export function auditToolExecution(
+  toolName: string,
+  params: Record<string, unknown>,
+  result: { success: boolean; error?: string },
+  userId?: string
+) {
+  writeAudit('tool_execution', {
+    tool: toolName,
+    params,
+    success: result.success,
+    error: result.error,
+    userId,
+  });
+}
+
+/**
+ * Audit log for auth events
+ */
+export function auditAuth(event: 'login' | 'logout' | 'token_refresh' | 'store_switch', data?: Record<string, unknown>) {
+  writeAudit(`auth_${event}`, data || {});
+}
+
+/**
+ * Audit log for dangerous command attempts
+ */
+export function auditDangerousCommand(command: string, blocked: boolean, reason?: string) {
+  writeAudit('dangerous_command', {
+    command: command.slice(0, 200), // Truncate for safety
+    blocked,
+    reason,
+  });
+}

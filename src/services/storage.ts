@@ -1,52 +1,18 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { config } from '../config.js';
-import type { AuthState, Message } from '../types.js';
+import type { Message } from '../types.js';
 
 // =============================================================================
 // Storage Paths
 // =============================================================================
 
-const AUTH_FILE = join(config.storageDir, 'auth.json');
 const SESSION_FILE = join(config.storageDir, 'session.json');
 
 // Ensure storage directory exists
 function ensureStorageDir(): void {
   if (!existsSync(config.storageDir)) {
     mkdirSync(config.storageDir, { recursive: true });
-  }
-}
-
-// =============================================================================
-// Auth Storage
-// =============================================================================
-
-export function loadAuth(): AuthState | null {
-  try {
-    if (existsSync(AUTH_FILE)) {
-      const data = readFileSync(AUTH_FILE, 'utf8');
-      const parsed = JSON.parse(data);
-
-      // Validate structure
-      if (parsed.accessToken && parsed.refreshToken) {
-        return parsed as AuthState;
-      }
-    }
-  } catch {
-    // Corrupted file, return null
-  }
-  return null;
-}
-
-export function saveAuth(state: AuthState): void {
-  ensureStorageDir();
-  writeFileSync(AUTH_FILE, JSON.stringify(state, null, 2), { mode: 0o600 });
-}
-
-export function clearAuth(): void {
-  ensureStorageDir();
-  if (existsSync(AUTH_FILE)) {
-    writeFileSync(AUTH_FILE, '{}', { mode: 0o600 });
   }
 }
 

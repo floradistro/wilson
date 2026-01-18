@@ -288,6 +288,68 @@ export const SymbolSchema: ToolSchema = {
   },
 };
 
+export const FetchSchema: ToolSchema = {
+  name: 'Fetch',
+  description: 'Make HTTP requests for API testing and live data debugging. Supports all methods, headers, JSON bodies.',
+  parameters: {
+    type: 'object',
+    properties: {
+      url: { type: 'string', description: 'The URL to fetch' },
+      method: {
+        type: 'string',
+        enum: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'],
+        description: 'HTTP method (default: GET)',
+      },
+      headers: {
+        type: 'object',
+        description: 'Request headers as key-value pairs',
+      },
+      body: {
+        type: ['string', 'object'],
+        description: 'Request body (auto-stringified if object)',
+      },
+      timeout: { type: 'number', description: 'Timeout in ms (default: 30000)' },
+      follow_redirects: { type: 'boolean', description: 'Follow redirects (default: true)' },
+    },
+    required: ['url'],
+  },
+};
+
+export const SupabaseFetchSchema: ToolSchema = {
+  name: 'SupabaseFetch',
+  description: 'Query Supabase tables directly. Auto-injects auth headers from config.',
+  parameters: {
+    type: 'object',
+    properties: {
+      table: { type: 'string', description: 'Table name to query' },
+      select: { type: 'string', description: 'Columns to select (default: *)' },
+      filter: { type: 'string', description: 'Filter like "status=eq.active"' },
+      limit: { type: 'number', description: 'Max rows (default: 10)' },
+      order: { type: 'string', description: 'Order like "created_at.desc"' },
+    },
+    required: ['table'],
+  },
+};
+
+export const EnvSchema: ToolSchema = {
+  name: 'Env',
+  description: 'Wire up a project with Supabase/Wilson credentials. Creates or updates .env files with proper authentication.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Path to .env file or project directory (default: cwd)' },
+      framework: {
+        type: 'string',
+        enum: ['nextjs', 'react', 'vue', 'nuxt', 'expo', 'node', 'auto'],
+        description: 'Framework to configure (auto-detects if not specified)',
+      },
+      include_service_key: { type: 'boolean', description: 'Include service role key (server-side only)' },
+      dry_run: { type: 'boolean', description: 'Preview changes without writing' },
+    },
+    required: [],
+  },
+};
+
 // All schemas for export
 export const ALL_SCHEMAS: ToolSchema[] = [
   ReadSchema,
@@ -300,6 +362,9 @@ export const ALL_SCHEMAS: ToolSchema[] = [
   IndexSchema,
   SearchSchema,
   SymbolSchema,
+  FetchSchema,
+  SupabaseFetchSchema,
+  EnvSchema,
   TodoWriteSchema,
   AskUserSchema,
 ];

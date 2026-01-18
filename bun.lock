@@ -10,6 +10,7 @@
         "ignore": "^7.0.5",
         "ink": "^5.0.1",
         "marked": "^17.0.1",
+        "postgres": "^3.4.8",
         "react": "^18.3.1",
         "react-devtools-core": "^7.0.1",
         "zod": "^3.23.8",
@@ -113,6 +114,8 @@
     "parse5-htmlparser2-tree-adapter": ["parse5-htmlparser2-tree-adapter@6.0.1", "", { "dependencies": { "parse5": "^6.0.1" } }, "sha512-qPuWvbLgvDGilKc5BoicRovlT4MtYT6JfJyBOMDsKoiT+GiuP5qyrPCnR9HcPECIJJmZh5jRndyNThnhhb/vlA=="],
 
     "patch-console": ["patch-console@2.0.0", "", {}, "sha512-0YNdUceMdaQwoKce1gatDScmMo5pu/tfABfnzEqeG0gtTmd7mh/WcwgUjtAeOU7N8nFFlbQBnFK2gXW5fGvmMA=="],
+
+    "postgres": ["postgres@3.4.8", "", {}, "sha512-d+JFcLM17njZaOLkv6SCev7uoLaBtfK86vMUXhW1Z4glPWh4jozno9APvW/XKFJ3CCxVoC7OL38BqRydtu5nGg=="],
 
     "react": ["react@18.3.1", "", { "dependencies": { "loose-envify": "^1.1.0" } }, "sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ=="],
 

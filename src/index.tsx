@@ -1,8 +1,9 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 import { render } from 'ink';
 import { App } from './App.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { parseArgs, printHelp, printVersion } from './utils/args.js';
+import { flushTelemetrySync } from './services/telemetry.js';
 
 // Parse command line arguments
 const args = parseArgs(process.argv.slice(2));
@@ -48,7 +49,9 @@ if (firstArg === 'test') {
     </ErrorBoundary>
   );
 
-  waitUntilExit().then(() => {
+  waitUntilExit().then(async () => {
+    // Flush any pending telemetry before exit
+    await flushTelemetrySync();
     process.exit(0);
   });
 }
