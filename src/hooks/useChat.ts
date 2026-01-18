@@ -25,6 +25,7 @@ export function useChat() {
   const [usage, setUsage] = useState<UsageStats>({ inputTokens: 0, outputTokens: 0 });
   const [toolCallCount, setToolCallCount] = useState(0);
   const [contextTokens, setContextTokens] = useState(0);
+  const [streamingChars, setStreamingChars] = useState(0);
 
   const conversationIdRef = useRef(crypto.randomUUID());
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -54,6 +55,7 @@ export function useChat() {
 
     setError(null);
     setIsStreaming(true);
+    setStreamingChars(0);
 
     // Add user message
     const userMessage: Message = {
@@ -170,7 +172,9 @@ export function useChat() {
         case 'text':
           if (event.text) {
             iterationText += event.text;
-            // Update message content directly - no separate streaming state
+            // Update live character count for footer
+            setStreamingChars(prev => prev + event.text!.length);
+            // Update message content directly
             const displayText = accumulatedContent
               ? accumulatedContent + '\n\n' + iterationText
               : iterationText;
@@ -349,6 +353,7 @@ export function useChat() {
     usage: { ...usage, totalTokens: usage.inputTokens + usage.outputTokens },
     toolCallCount,
     contextTokens,
+    streamingChars,
     sendMessage,
     clearMessages,
     clearError,

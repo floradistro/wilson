@@ -32,7 +32,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
     login,
     logout,
   } = useAuth();
-  const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, sendMessage, clearMessages, clearError } = useChat();
+  const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, streamingChars, sendMessage, clearMessages, clearError } = useChat();
   const [inputValue, setInputValue] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [initialQuerySent, setInitialQuerySent] = useState(false);
@@ -388,6 +388,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
           usage={usage}
           toolCallCount={toolCallCount}
           contextTokens={contextTokens}
+          streamingChars={streamingChars}
           isStreaming={isStreaming}
         />
       )}
