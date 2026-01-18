@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { render } from 'ink';
 import { App } from './App.js';
+import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { parseArgs, printHelp, printVersion } from './utils/args.js';
 
 // Parse command line arguments
@@ -38,11 +39,13 @@ if (firstArg === 'test') {
   }
 
   const { waitUntilExit } = render(
-    <App
-      initialQuery={command ? undefined : args.query}
-      flags={args.flags}
-      command={command}
-    />
+    <ErrorBoundary>
+      <App
+        initialQuery={command ? undefined : args.query}
+        flags={args.flags}
+        command={command}
+      />
+    </ErrorBoundary>
   );
 
   waitUntilExit().then(() => {

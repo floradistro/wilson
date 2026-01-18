@@ -1,11 +1,10 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Message, ToolCall, Todo, PendingQuestion, PendingPermission } from '../types.js';
 import { useStream, type StreamEvent } from './useStream.js';
 import { useTools } from './useTools.js';
 import { sendChatRequest } from '../services/api.js';
-import { compactConversation, getContextUsage } from '../utils/context.js';
-// History saving disabled - every session is fresh
-// import { saveLocalHistory } from '../services/storage.js';
+import { compactConversation } from '../utils/context.js';
+import { log } from '../utils/logger.js';
 
 interface ToolCallbacks {
   onAskUser?: (question: PendingQuestion) => Promise<string>;
@@ -28,8 +27,18 @@ export function useChat() {
   const [contextTokens, setContextTokens] = useState(0);
 
   const conversationIdRef = useRef(crypto.randomUUID());
+  const abortControllerRef = useRef<AbortController | null>(null);
   const { executeTools } = useTools();
   const { processStream } = useStream();
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, []);
 
   const sendMessage = useCallback(async (
     content: string,
@@ -37,6 +46,12 @@ export function useChat() {
     storeId: string,
     callbacks?: ToolCallbacks
   ) => {
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+
     setError(null);
     setIsStreaming(true);
 
@@ -124,7 +139,7 @@ export function useChat() {
     // Compact conversation if approaching context limit (Claude Code style)
     const { messages: compactedHistory, wasCompacted, tokensAfter } = compactConversation(conversationHistory);
     if (wasCompacted) {
-      console.log('[useChat] Conversation compacted to stay within context limits');
+      log.info('Conversation compacted to stay within context limits');
     }
     setContextTokens(tokensAfter);
 
