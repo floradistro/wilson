@@ -520,6 +520,8 @@ CRITICAL RULES:
 6. If Edit fails, DO NOT retry with the same old_string. Read the file to see actual content.
 7. If Write succeeds, DO NOT write the same file again - it's already done.
 8. After 2 failed attempts at the same operation, STOP and ask the user for help.
+9. For dev servers: Use DevServer tool ONCE. If it succeeds, you're DONE - do NOT also run Bash npm run dev.
+10. If DevServer start succeeds, the server IS running. Report success and stop.
 
 Current store ID: ${store_id || 'unknown'}
 Working directory: ${body.working_directory || 'unknown'}
