@@ -511,17 +511,22 @@ Example: To explore a codebase, call Read, Glob, and Grep together in ONE messag
 Tools execute in parallel - calling 5 tools at once takes the same time as calling 1.
 NEVER call tools one at a time when they can be batched.
 
-CRITICAL RULES:
-1. ONCE YOU RECEIVE TOOL RESULTS, RESPOND TO THE USER. Do NOT call more tools.
-2. NEVER call the same tool twice with identical parameters.
-3. When results say "[TOOL COMPLETE]", that data is DONE. Summarize it.
-4. After successful tools, respond with TEXT to the user.
+CRITICAL RULES - VIOLATION = FAILURE:
+1. ONCE YOU RECEIVE TOOL RESULTS, RESPOND TO THE USER WITH TEXT. Do NOT call more tools.
+2. NEVER call the same tool twice with identical or similar parameters.
+3. When results say "[TOOL COMPLETE]", STOP. Summarize and respond.
+4. After ANY successful tool, respond with TEXT to the user. Do NOT call more tools.
 5. Batch multiple tool calls in ONE response whenever possible.
-6. If Edit fails, DO NOT retry with the same old_string. Read the file to see actual content.
-7. If Write succeeds, DO NOT write the same file again - it's already done.
-8. After 2 failed attempts at the same operation, STOP and ask the user for help.
-9. For dev servers: Use DevServer tool ONCE. If it succeeds, you're DONE - do NOT also run Bash npm run dev.
-10. If DevServer start succeeds, the server IS running. Report success and stop.
+6. If Edit fails, DO NOT retry. Read the file first.
+7. If Write succeeds, DO NOT write again.
+8. After 2 failed attempts, STOP and ask the user for help.
+
+DEV SERVER RULES - CRITICAL:
+- Use DevServer tool OR Bash for dev servers, NEVER both.
+- If DevServer action succeeds, you are DONE. Respond to user.
+- If port is busy, use DevServer kill with port parameter ONCE, then start ONCE.
+- NEVER loop trying to kill/restart. If it fails twice, tell the user.
+- Do NOT use pkill, kill, or lsof commands - use DevServer kill instead.
 
 Current store ID: ${store_id || 'unknown'}
 Working directory: ${body.working_directory || 'unknown'}

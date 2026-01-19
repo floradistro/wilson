@@ -137,13 +137,12 @@ export function useChat() {
     // 1. Tool results include clear "[TOOL COMPLETE]" prefix
     // 2. Failed tools get is_error: true
     // 3. cache_control marks results as processed
-    // 4. Depth limit as ultimate safety net (not pattern matching)
+    // 4. Depth limit as ultimate safety net
     //
-    // We do NOT do client-side pattern matching - it breaks legitimate parallel calls
-    // and Claude is trained to know when to stop.
+    // Reduced from 30 to 15 - if Claude needs more than 15 iterations, something is wrong.
 
-    if (depth > 30) {
-      setError('Maximum iterations reached (30). Use /clear to reset.');
+    if (depth > 15) {
+      setError('Maximum iterations reached (15). Use /clear to reset.');
       updateLastMessage({ isStreaming: false });
       return;
     }
