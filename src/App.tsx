@@ -459,12 +459,12 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   // Config view
   if (viewMode === 'config') {
-    return <ConfigView mode="settings" />;
+    return <ConfigView mode="settings" onExit={() => setViewMode('chat')} />;
   }
 
   // Rules view
   if (viewMode === 'rules') {
-    return <ConfigView mode="rules" />;
+    return <ConfigView mode="rules" onExit={() => setViewMode('chat')} />;
   }
 
   // Swarm view

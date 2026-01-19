@@ -35,15 +35,15 @@ export async function decomposeGoal(
   storeId: string,
   workerCount: number
 ): Promise<SwarmTask[]> {
-  const prompt = `You are a task decomposition expert. Break down this goal into ${workerCount} parallel tasks that can be worked on by separate AI agents.
+  const prompt = `You are a task decomposition expert. Break down this goal into ${workerCount} COMPLETELY INDEPENDENT parallel tasks that can ALL start immediately.
 
 GOAL: ${goal}
 
-Requirements:
-1. Each task should be independently workable
-2. Identify dependencies between tasks (which tasks must complete before others can start)
+CRITICAL REQUIREMENTS:
+1. ALL tasks must have NO dependencies - they all start at the same time
+2. Each task should be independently workable without waiting for others
 3. Be specific about what each task should accomplish
-4. Include validation criteria for each task
+4. Tasks should divide the work so agents don't conflict
 
 Respond in this exact JSON format:
 {
@@ -52,11 +52,12 @@ Respond in this exact JSON format:
       "id": "task-1",
       "description": "Clear description of what to do",
       "dependencies": [],
-      "priority": 1,
-      "specialty": "backend|frontend|testing|docs|infra"
+      "priority": 1
     }
   ]
 }
+
+IMPORTANT: dependencies array must ALWAYS be empty [] for parallel execution!
 
 Only respond with the JSON, no other text.`;
 

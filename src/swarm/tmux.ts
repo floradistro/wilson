@@ -1,5 +1,4 @@
-import { execSync, spawn, ChildProcess } from 'child_process';
-import { existsSync } from 'fs';
+import { execSync } from 'child_process';
 import type { SwarmConfig, SwarmWorker, SwarmState } from './types.js';
 
 // =============================================================================
@@ -42,14 +41,12 @@ export function generateSessionName(): string {
 
 /**
  * Create a new tmux session with the swarm layout
- * Layout:
- * ┌─────────────────────────────────────────────────┐
- * │ COMMANDER (status/control)                       │
- * ├────────────────────┬────────────────────────────┤
- * │ Worker 1           │ Worker 2                    │
- * ├────────────────────┼────────────────────────────┤
- * │ Worker 3           │ Validator                   │
- * └────────────────────┴────────────────────────────┘
+ * Simple 2x2 grid layout for 4 workers:
+ * ┌─────────────────┬─────────────────┐
+ * │ Worker 1        │ Worker 2        │
+ * ├─────────────────┼─────────────────┤
+ * │ Worker 3        │ Worker 4        │
+ * └─────────────────┴─────────────────┘
  */
 export function createSwarmSession(config: SwarmConfig): {
   sessionName: string;
@@ -59,67 +56,98 @@ export function createSwarmSession(config: SwarmConfig): {
 } {
   const sessionName = generateSessionName();
   const workers: SwarmWorker[] = [];
+  const workerCount = Math.min(config.workerCount, 4); // Cap at 4 for clean layout
 
-  // Create session with commander pane (first window)
+  // Create session - first pane becomes Worker 1
   execSync(
-    `tmux new-session -d -s ${sessionName} -n main -x 200 -y 50`,
+    `tmux new-session -d -s ${sessionName} -n main`,
     { cwd: config.workingDirectory }
   );
 
-  // Set pane border format to show names
-  execSync(`tmux set-option -t ${sessionName} pane-border-format "#{pane_index}: #{pane_title}"`);
+  // Set pane border format
+  execSync(`tmux set-option -t ${sessionName} pane-border-format " #{pane_title} "`);
   execSync(`tmux set-option -t ${sessionName} pane-border-status top`);
+  execSync(`tmux set-option -t ${sessionName} pane-border-style "fg=green"`);
+  execSync(`tmux set-option -t ${sessionName} pane-active-border-style "fg=brightgreen,bold"`);
 
-  // Get commander pane ID
-  const commanderPaneId = execSync(
-    `tmux display-message -t ${sessionName} -p '#{pane_id}'`,
+  // Get first pane ID (Worker 1)
+  const pane1 = execSync(
+    `tmux display-message -t ${sessionName}:0.0 -p '#{pane_id}'`,
     { encoding: 'utf8' }
   ).trim();
+  execSync(`tmux select-pane -t ${pane1} -T "Worker 1"`);
+  workers.push({
+    id: 'worker-1',
+    name: 'Worker 1',
+    status: 'idle',
+    paneId: pane1,
+    tasksCompleted: 0,
+    lastActivity: Date.now(),
+  });
 
-  // Name the commander pane
-  execSync(`tmux select-pane -t ${sessionName}:0.0 -T "Commander"`);
-
-  // Split horizontally for validator (bottom right)
-  execSync(`tmux split-window -t ${sessionName}:0 -h -p 50`);
-  const validatorPaneId = execSync(
+  // Split horizontally for Worker 2 (right side)
+  execSync(`tmux split-window -t ${sessionName}:0.0 -h -p 50`);
+  const pane2 = execSync(
     `tmux display-message -t ${sessionName}:0.1 -p '#{pane_id}'`,
     { encoding: 'utf8' }
   ).trim();
-  execSync(`tmux select-pane -t ${sessionName}:0.1 -T "Validator"`);
+  execSync(`tmux select-pane -t ${pane2} -T "Worker 2"`);
+  workers.push({
+    id: 'worker-2',
+    name: 'Worker 2',
+    status: 'idle',
+    paneId: pane2,
+    tasksCompleted: 0,
+    lastActivity: Date.now(),
+  });
 
-  // Create worker panes
-  const workerCount = Math.min(config.workerCount, 8); // Cap at 8 workers
-
-  for (let i = 0; i < workerCount; i++) {
-    // Alternate between splitting left and right panes
-    const targetPane = i % 2 === 0 ? 0 : 1;
-    execSync(`tmux split-window -t ${sessionName}:0.${targetPane} -v -p ${Math.floor(100 / (Math.ceil(workerCount / 2) + 1))}`);
-
-    const paneId = execSync(
-      `tmux display-message -t ${sessionName}:0 -p '#{pane_id}'`,
+  if (workerCount >= 3) {
+    // Split Worker 1 vertically for Worker 3 (bottom left)
+    execSync(`tmux split-window -t ${pane1} -v -p 50`);
+    const pane3 = execSync(
+      `tmux display-message -t ${sessionName}:0.2 -p '#{pane_id}'`,
       { encoding: 'utf8' }
     ).trim();
-
-    const workerId = `worker-${i + 1}`;
-    execSync(`tmux select-pane -t ${paneId} -T "${workerId}"`);
-
+    execSync(`tmux select-pane -t ${pane3} -T "Worker 3"`);
     workers.push({
-      id: workerId,
-      name: `Worker ${i + 1}`,
+      id: 'worker-3',
+      name: 'Worker 3',
       status: 'idle',
-      paneId,
+      paneId: pane3,
       tasksCompleted: 0,
       lastActivity: Date.now(),
     });
   }
 
-  // Re-arrange to tiled layout for better visibility
-  execSync(`tmux select-layout -t ${sessionName}:0 tiled`);
+  if (workerCount >= 4) {
+    // Split Worker 2 vertically for Worker 4 (bottom right)
+    execSync(`tmux split-window -t ${pane2} -v -p 50`);
+    const pane4 = execSync(
+      `tmux display-message -t ${sessionName}:0.3 -p '#{pane_id}'`,
+      { encoding: 'utf8' }
+    ).trim();
+    execSync(`tmux select-pane -t ${pane4} -T "Worker 4"`);
+    workers.push({
+      id: 'worker-4',
+      name: 'Worker 4',
+      status: 'idle',
+      paneId: pane4,
+      tasksCompleted: 0,
+      lastActivity: Date.now(),
+    });
+  }
 
-  // Select commander pane
-  execSync(`tmux select-pane -t ${commanderPaneId}`);
+  // Select first pane
+  execSync(`tmux select-pane -t ${pane1}`);
 
-  return { sessionName, workers, commanderPaneId, validatorPaneId };
+  // Return empty commander/validator panes - we're not using them anymore
+  // Each worker runs the full Wilson UI
+  return {
+    sessionName,
+    workers,
+    commanderPaneId: pane1, // Not really used
+    validatorPaneId: pane1, // Not really used
+  };
 }
 
 /**
@@ -132,7 +160,7 @@ export function sendToPane(sessionName: string, paneId: string, command: string)
 }
 
 /**
- * Start a Wilson worker in a pane
+ * Start a Wilson worker in a pane - runs full Wilson UI with worker mode
  */
 export function startWorkerInPane(
   sessionName: string,
@@ -140,13 +168,13 @@ export function startWorkerInPane(
   workerId: string,
   workingDirectory: string
 ): void {
-  // Start Wilson in worker mode
+  // Run Wilson in worker mode - this renders the full UI
   const command = `cd "${workingDirectory}" && wilson --worker ${workerId}`;
   sendToPane(sessionName, paneId, command);
 }
 
 /**
- * Start the validator in a pane
+ * Start the validator in a pane (not used in new design)
  */
 export function startValidatorInPane(
   sessionName: string,
@@ -158,7 +186,7 @@ export function startValidatorInPane(
 }
 
 /**
- * Start the commander view in a pane
+ * Start the commander view in a pane (not used in new design)
  */
 export function startCommanderInPane(
   sessionName: string,
@@ -166,7 +194,6 @@ export function startCommanderInPane(
   workingDirectory: string,
   goal: string
 ): void {
-  // Commander runs the swarm monitor
   const escapedGoal = goal.replace(/"/g, '\\"');
   const command = `cd "${workingDirectory}" && wilson --swarm-monitor "${escapedGoal}"`;
   sendToPane(sessionName, paneId, command);
@@ -176,7 +203,6 @@ export function startCommanderInPane(
  * Attach to a tmux session
  */
 export function attachSession(sessionName: string): void {
-  // This will replace the current process
   execSync(`tmux attach-session -t ${sessionName}`, { stdio: 'inherit' });
 }
 
@@ -235,23 +261,12 @@ export function focusPane(sessionName: string, paneId: string): void {
   execSync(`tmux select-pane -t ${paneId}`);
 }
 
-/**
- * Resize the commander pane (top row)
- */
-export function resizeCommanderPane(sessionName: string, height: number): void {
-  try {
-    execSync(`tmux resize-pane -t ${sessionName}:0.0 -y ${height}`);
-  } catch {
-    // Ignore resize errors
-  }
-}
-
 // =============================================================================
 // High-level Swarm Operations
 // =============================================================================
 
 /**
- * Spawn a complete swarm
+ * Spawn a complete swarm - just creates tmux session with worker panes
  */
 export function spawnSwarm(config: SwarmConfig): SwarmState {
   if (!isTmuxAvailable()) {
@@ -259,7 +274,7 @@ export function spawnSwarm(config: SwarmConfig): SwarmState {
   }
 
   // Create the session
-  const { sessionName, workers, commanderPaneId, validatorPaneId } = createSwarmSession(config);
+  const { sessionName, workers } = createSwarmSession(config);
 
   // Initialize swarm state
   const state: SwarmState = {
@@ -287,46 +302,15 @@ export function spawnSwarm(config: SwarmConfig): SwarmState {
 }
 
 /**
- * Launch all workers and validator
+ * Launch all workers - each runs full Wilson UI
  */
 export function launchSwarmProcesses(state: SwarmState): void {
-  // Start workers
+  // Start workers - each one runs Wilson with its task
   for (const worker of state.workers) {
     startWorkerInPane(
       state.tmuxSession,
       worker.paneId,
       worker.id,
-      state.workingDirectory
-    );
-  }
-
-  // Find validator pane (it's the one not assigned to a worker)
-  const workerPaneIds = new Set(state.workers.map(w => w.paneId));
-
-  // Get all panes
-  const panes = execSync(
-    `tmux list-panes -t ${state.tmuxSession}:0 -F "#{pane_id}"`,
-    { encoding: 'utf8' }
-  ).trim().split('\n');
-
-  // Find commander and validator panes (first two that aren't workers)
-  const nonWorkerPanes = panes.filter(p => !workerPaneIds.has(p));
-
-  if (nonWorkerPanes.length >= 2) {
-    const [commanderPaneId, validatorPaneId] = nonWorkerPanes;
-
-    // Start commander monitor
-    startCommanderInPane(
-      state.tmuxSession,
-      commanderPaneId,
-      state.workingDirectory,
-      state.goal
-    );
-
-    // Start validator
-    startValidatorInPane(
-      state.tmuxSession,
-      validatorPaneId,
       state.workingDirectory
     );
   }

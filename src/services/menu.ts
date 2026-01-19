@@ -124,12 +124,14 @@ export function clearMenuCache(): void {
 
 /**
  * Convert backend slash commands to Command format for CommandMenu
+ * Uses label (which has spaces like "config edit") rather than item_id (which may have underscores)
  */
 export function getSlashCommands(): Array<{ name: string; aliases: string[]; description: string }> {
   const menu = getMenuConfig();
   return menu.slash.map(item => ({
-    name: item.item_id,
-    aliases: [], // Could be extended to support aliases from backend
+    // Use label for display/matching (e.g., "config edit"), not item_id (e.g., "config_edit")
+    name: item.label || item.item_id,
+    aliases: [],
     description: item.description || '',
   }));
 }

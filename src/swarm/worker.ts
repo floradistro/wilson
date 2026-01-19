@@ -1,3 +1,5 @@
+import { render } from 'ink';
+import React from 'react';
 import type { SwarmTask, SwarmIPC, TaskResult } from './types.js';
 import {
   getIPCPaths,
@@ -5,13 +7,11 @@ import {
   pushToCompletionQueue,
   updateState,
   readState,
-  sendMessage,
 } from './queue.js';
-import { sendChatRequest } from '../services/api.js';
 
 // =============================================================================
 // Swarm Worker
-// A worker process that pulls tasks from the queue and executes them
+// Runs the full Wilson UI but with a pre-assigned task from the queue
 // =============================================================================
 
 interface WorkerConfig {
@@ -22,8 +22,8 @@ interface WorkerConfig {
 }
 
 /**
- * Run the worker loop
- * Continuously pulls tasks from queue and executes them
+ * Run a worker that uses the full Wilson UI
+ * This spawns the actual Wilson app with a task as the initial query
  */
 export async function runWorkerLoop(config: WorkerConfig): Promise<void> {
   const { workerId, workingDirectory, accessToken, storeId } = config;
@@ -56,15 +56,15 @@ export async function runWorkerLoop(config: WorkerConfig): Promise<void> {
     console.log(`\n📋 Worker ${workerId}: Starting task "${task.description}"`);
     await updateWorkerStatus(paths, workerId, 'working', task.id);
 
-    // Execute the task
+    // Execute the task using the full Wilson app
     try {
-      const result = await executeTask(task, config);
+      const result = await executeTaskWithWilsonUI(task, config);
 
       task.result = result;
       task.status = 'validating';
       task.completedAt = Date.now();
 
-      console.log(`✓ Worker ${workerId}: Task completed, sending for validation`);
+      console.log(`\n✓ Worker ${workerId}: Task completed, sending for validation`);
 
       // Push to completion queue for validation
       await pushToCompletionQueue(paths, task);
@@ -82,7 +82,7 @@ export async function runWorkerLoop(config: WorkerConfig): Promise<void> {
       });
 
     } catch (err: any) {
-      console.error(`✗ Worker ${workerId}: Task failed - ${err.message}`);
+      console.error(`\n✗ Worker ${workerId}: Task failed - ${err.message}`);
 
       task.result = {
         success: false,
@@ -100,144 +100,66 @@ export async function runWorkerLoop(config: WorkerConfig): Promise<void> {
 }
 
 /**
- * Execute a single task using Wilson AI
+ * Execute a task by running the full Wilson UI with the task as initial query
  */
-async function executeTask(task: SwarmTask, config: WorkerConfig): Promise<TaskResult> {
-  const { workingDirectory, accessToken, storeId } = config;
+async function executeTaskWithWilsonUI(task: SwarmTask, config: WorkerConfig): Promise<TaskResult> {
+  const { workerId, workingDirectory, accessToken, storeId } = config;
 
-  // Build the execution prompt
-  const prompt = `You are a focused AI worker executing a specific task as part of a larger project.
+  // Dynamically import the App to avoid circular dependencies
+  const { App } = await import('../App.js');
+  const { ErrorBoundary } = await import('../components/ErrorBoundary.js');
 
-TASK: ${task.description}
+  // Build task prompt
+  const taskPrompt = `[SWARM TASK ${task.id}]
 
-CONTEXT:
-- Working directory: ${workingDirectory}
-- This is task ${task.id} in a multi-agent workflow
-- Other tasks may depend on your output
+You are Worker ${workerId} in a multi-agent swarm. Execute this task:
 
-INSTRUCTIONS:
-1. Execute this task completely
-2. Use the available tools (bash, file operations, etc.)
-3. Be thorough but focused on just this task
-4. Report exactly what files you created or modified
+${task.description}
 
-When complete, respond with a summary in this format:
-TASK COMPLETE
-Files created: [list of files]
-Files modified: [list of files]
-Summary: [brief description of what was done]`;
+Instructions:
+- Focus ONLY on this specific task
+- Use tools as needed (bash, file operations, etc.)
+- When done, say "TASK COMPLETE" and summarize what you did
+- List any files you created or modified`;
 
-  // Execute with Wilson
-  const history: Array<{ role: string; content: unknown }> = [
-    { role: 'user', content: prompt }
-  ];
+  return new Promise((resolve) => {
+    let completed = false;
 
-  let fullResponse = '';
-  const filesCreated: string[] = [];
-  const filesModified: string[] = [];
+    // Render the full Wilson app with the task as initial query
+    const { unmount, waitUntilExit } = render(
+      React.createElement(ErrorBoundary, null,
+        React.createElement(App, {
+          initialQuery: taskPrompt,
+          flags: { dangerouslySkipPermissions: true }, // Auto-approve in swarm mode
+          command: undefined,
+        })
+      )
+    );
 
-  try {
-    const response = await sendChatRequest({
-      message: prompt,
-      conversationHistory: history,
-      accessToken,
-      storeId,
+    // Set a timeout for task completion (5 minutes)
+    const timeout = setTimeout(() => {
+      if (!completed) {
+        completed = true;
+        unmount();
+        resolve({
+          success: true,
+          output: 'Task timed out after 5 minutes',
+        });
+      }
+    }, 5 * 60 * 1000);
+
+    // Wait for the app to exit
+    waitUntilExit().then(() => {
+      if (!completed) {
+        completed = true;
+        clearTimeout(timeout);
+        resolve({
+          success: true,
+          output: 'Task completed',
+        });
+      }
     });
-
-    // Process the streamed response
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body');
-
-    const decoder = new TextDecoder();
-    let loopCount = 0;
-    const maxLoops = 50; // Safety limit
-
-    while (loopCount < maxLoops) {
-      loopCount++;
-
-      // Read stream
-      let iterationResponse = '';
-      let pendingTools: any[] = [];
-      let assistantContent: unknown[] = [];
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value);
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-
-          try {
-            const data = JSON.parse(line.slice(6));
-
-            if (data.type === 'text_delta' && data.content) {
-              iterationResponse += data.content;
-              process.stdout.write(data.content);
-            }
-
-            if (data.type === 'tools_pending') {
-              pendingTools = data.pending_tools || [];
-              assistantContent = data.assistant_content || [];
-            }
-
-            if (data.type === 'error') {
-              throw new Error(data.error);
-            }
-          } catch (parseErr) {
-            // Ignore JSON parse errors in stream
-          }
-        }
-      }
-
-      fullResponse += iterationResponse;
-
-      // If there were tools, we need to continue (tool results come from backend)
-      if (pendingTools.length === 0) {
-        break;
-      }
-
-      // For now, break after first iteration - full tool loop would require
-      // more infrastructure. The backend handles tool execution for us.
-      break;
-    }
-
-    // Parse the completion response
-    if (fullResponse.includes('TASK COMPLETE')) {
-      const createdMatch = fullResponse.match(/Files created:\s*\[(.*?)\]/s);
-      const modifiedMatch = fullResponse.match(/Files modified:\s*\[(.*?)\]/s);
-
-      if (createdMatch) {
-        filesCreated.push(...createdMatch[1].split(',').map(s => s.trim()).filter(Boolean));
-      }
-      if (modifiedMatch) {
-        filesModified.push(...modifiedMatch[1].split(',').map(s => s.trim()).filter(Boolean));
-      }
-
-      return {
-        success: true,
-        output: fullResponse,
-        filesCreated,
-        filesModified,
-      };
-    } else {
-      // Task didn't explicitly complete, might need more work
-      return {
-        success: true,
-        output: fullResponse,
-        filesCreated,
-        filesModified,
-      };
-    }
-
-  } catch (err: any) {
-    return {
-      success: false,
-      error: err.message,
-    };
-  }
+  });
 }
 
 /**
