@@ -229,45 +229,167 @@ function formatValue(item: SettingItem): string {
 }
 
 // =============================================================================
-// Rules View - Shows WILSON.md with edit option
+// Rules View - Interactive WILSON.md editor
 // =============================================================================
 
 function RulesView({ onExit }: { onExit?: () => void }) {
-  const [memory, setMemory] = useState(loadMemory());
+  const [lines, setLines] = useState<string[]>(() => loadMemory().split('\n'));
+  const [selectedLine, setSelectedLine] = useState(0);
+  const [editMode, setEditMode] = useState(false);
+  const [editBuffer, setEditBuffer] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
   const [scrollOffset, setScrollOffset] = useState(0);
-  const lines = memory.split('\n');
-  const visibleLines = 20;
+  const visibleLines = 18;
+
+  // Keep selected line in view
+  useEffect(() => {
+    if (selectedLine < scrollOffset) {
+      setScrollOffset(selectedLine);
+    } else if (selectedLine >= scrollOffset + visibleLines) {
+      setScrollOffset(selectedLine - visibleLines + 1);
+    }
+  }, [selectedLine, scrollOffset]);
 
   useInput((input, key) => {
+    // Edit mode - typing into line
+    if (editMode) {
+      if (key.escape) {
+        setEditMode(false);
+        setEditBuffer('');
+        return;
+      }
+      if (key.return) {
+        // Save the edit
+        setLines(prev => {
+          const updated = [...prev];
+          updated[selectedLine] = editBuffer;
+          return updated;
+        });
+        setEditMode(false);
+        setEditBuffer('');
+        setDirty(true);
+        setMessage(null);
+        return;
+      }
+      if (key.backspace) {
+        setEditBuffer(b => b.slice(0, -1));
+        return;
+      }
+      if (key.tab) {
+        // Tab = 2 spaces (common for markdown)
+        setEditBuffer(b => b + '  ');
+        return;
+      }
+      // Space and all other printable chars
+      if (input && !key.ctrl && !key.meta) {
+        setEditBuffer(b => b + input);
+        return;
+      }
+      return;
+    }
+
+    // Navigation mode
     if (key.upArrow) {
-      setScrollOffset(o => Math.max(0, o - 1));
+      setSelectedLine(i => Math.max(0, i - 1));
       return;
     }
     if (key.downArrow) {
-      setScrollOffset(o => Math.min(lines.length - visibleLines, o + 1));
+      setSelectedLine(i => Math.min(lines.length - 1, i + 1));
       return;
     }
+
+    // Enter edit mode
+    if (key.return || input === 'e') {
+      setEditMode(true);
+      setEditBuffer(lines[selectedLine] || '');
+      return;
+    }
+
+    // Add new line after current (o = edit, Enter in nav = blank line)
+    if (input === 'o') {
+      setLines(prev => {
+        const updated = [...prev];
+        updated.splice(selectedLine + 1, 0, '');
+        return updated;
+      });
+      setSelectedLine(i => i + 1);
+      setEditMode(true);
+      setEditBuffer('');
+      setDirty(true);
+      return;
+    }
+
+    // Add blank line after current (quick spacing)
+    if (key.return) {
+      setLines(prev => {
+        const updated = [...prev];
+        updated.splice(selectedLine + 1, 0, '');
+        return updated;
+      });
+      setSelectedLine(i => i + 1);
+      setDirty(true);
+      return;
+    }
+
+    // Add new line before current
+    if (input === 'O') {
+      setLines(prev => {
+        const updated = [...prev];
+        updated.splice(selectedLine, 0, '');
+        return updated;
+      });
+      setEditMode(true);
+      setEditBuffer('');
+      setDirty(true);
+      return;
+    }
+
+    // Delete line
+    if (input === 'd' && lines.length > 1) {
+      setLines(prev => {
+        const updated = [...prev];
+        updated.splice(selectedLine, 1);
+        return updated;
+      });
+      setSelectedLine(i => Math.min(i, lines.length - 2));
+      setDirty(true);
+      return;
+    }
+
+    // Save
+    if (input === 's' && dirty) {
+      saveRules();
+      return;
+    }
+
+    // Exit
     if (key.escape) {
-      onExit?.();
-      return;
-    }
-    // 'e' to open in editor
-    if (input === 'e') {
-      const cwd = process.cwd();
-      const rulesPath = existsSync(join(cwd, 'WILSON.md'))
-        ? join(cwd, 'WILSON.md')
-        : join(cwd, '.wilson', 'WILSON.md');
-      const editor = process.env.EDITOR || 'nano';
-      try {
-        require('child_process').execSync(`${editor} ${rulesPath}`, { stdio: 'inherit' });
-        clearSettingsCache();
-        setMemory(loadMemory());
-      } catch {
-        // Editor closed or failed
+      if (dirty) {
+        setMessage('Unsaved changes! Press s to save, Esc again to discard');
+        setDirty(false);
+      } else {
+        onExit?.();
       }
       return;
     }
   });
+
+  function saveRules() {
+    try {
+      const cwd = process.cwd();
+      const rulesPath = existsSync(join(cwd, 'WILSON.md'))
+        ? join(cwd, 'WILSON.md')
+        : join(cwd, '.wilson', 'WILSON.md');
+      writeFileSync(rulesPath, lines.join('\n'));
+      clearSettingsCache();
+      setDirty(false);
+      setMessage('Rules saved!');
+      setTimeout(() => setMessage(null), 2000);
+    } catch (err) {
+      setMessage(`Error saving: ${err}`);
+    }
+  }
 
   const displayLines = lines.slice(scrollOffset, scrollOffset + visibleLines);
 
@@ -276,21 +398,57 @@ function RulesView({ onExit }: { onExit?: () => void }) {
       <Box marginBottom={1}>
         <Text bold color={COLORS.primary}>wilson</Text>
         <Text color={COLORS.textDim}> - Rules (WILSON.md)</Text>
+        {dirty && <Text color={COLORS.warning}> (modified)</Text>}
         {lines.length > visibleLines && (
           <Text color={COLORS.textDim}> [{scrollOffset + 1}-{Math.min(scrollOffset + visibleLines, lines.length)}/{lines.length}]</Text>
         )}
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        {displayLines.map((line, i) => (
-          <Text key={i + scrollOffset} color={line.startsWith('#') ? COLORS.primary : COLORS.text}>
-            {line || ' '}
-          </Text>
-        ))}
+        {displayLines.map((line, i) => {
+          const lineIndex = scrollOffset + i;
+          const isSelected = lineIndex === selectedLine;
+          const isEditing = isSelected && editMode;
+          const isHeader = line.startsWith('#');
+
+          return (
+            <Box key={lineIndex}>
+              <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
+                {isSelected ? '▸ ' : '  '}
+              </Text>
+              <Text color={COLORS.textDim} dimColor>
+                {String(lineIndex + 1).padStart(3, ' ')}
+              </Text>
+              {isEditing ? (
+                <Text color={COLORS.text}>
+                  {editBuffer}
+                  <Text color={COLORS.primary}>█</Text>
+                </Text>
+              ) : (
+                <Text color={isHeader ? COLORS.primary : (isSelected ? COLORS.text : COLORS.textMuted)}>
+                  {line || ' '}
+                </Text>
+              )}
+            </Box>
+          );
+        })}
       </Box>
 
-      <Box marginTop={1}>
-        <Text color={COLORS.textDim}>↑↓ scroll | e open in editor | Esc exit</Text>
+      <Box marginTop={1} flexDirection="column">
+        {message && (
+          <Text color={message.includes('Error') ? COLORS.error : COLORS.success}>{message}</Text>
+        )}
+        <Box>
+          {editMode ? (
+            <Text color={COLORS.info}>EDIT: Type to edit | Enter to save | Esc to cancel</Text>
+          ) : (
+            <>
+              <Text color={COLORS.textDim}>↑↓ nav | e edit | Enter blank | o/O new line | d del | </Text>
+              {dirty && <Text color={COLORS.warning}>s save | </Text>}
+              <Text color={COLORS.textDim}>Esc</Text>
+            </>
+          )}
+        </Box>
       </Box>
     </Box>
   );

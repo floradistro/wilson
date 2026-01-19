@@ -1,15 +1,8 @@
-import type { SwarmConfig, SwarmState, SwarmTask, SwarmIPC } from './types.js';
+import type { SwarmConfig, SwarmState, SwarmTask } from './types.js';
 import {
   initSwarmDir,
   getIPCPaths,
   writeState,
-  readState,
-  pushManyToGoalQueue,
-  updateState,
-  readMessagesFor,
-  clearMessagesFor,
-  isSwarmComplete,
-  calculateProgress,
   cleanupSwarmDir,
 } from './queue.js';
 import {
@@ -23,43 +16,24 @@ import { sendChatRequest } from '../services/api.js';
 
 // =============================================================================
 // Swarm Commander
-// Orchestrates the entire swarm: decomposes goals, spawns workers, monitors progress
+// Orchestrates multiple Wilson instances working on parts of a goal
 // =============================================================================
 
 /**
- * Decompose a high-level goal into tasks using Wilson AI
+ * Simple task decomposition - splits goal into 2 parallel parts
  */
 export async function decomposeGoal(
   goal: string,
   accessToken: string,
   storeId: string,
-  workerCount: number
-): Promise<SwarmTask[]> {
-  const prompt = `You are a task decomposition expert. Break down this goal into ${workerCount} COMPLETELY INDEPENDENT parallel tasks that can ALL start immediately.
+  workerCount: number = 2
+): Promise<string[]> {
+  const prompt = `Split this task into exactly ${workerCount} independent parts that can be done in parallel by separate AI agents. Each part should be a complete, standalone task.
 
 GOAL: ${goal}
 
-CRITICAL REQUIREMENTS:
-1. ALL tasks must have NO dependencies - they all start at the same time
-2. Each task should be independently workable without waiting for others
-3. Be specific about what each task should accomplish
-4. Tasks should divide the work so agents don't conflict
-
-Respond in this exact JSON format:
-{
-  "tasks": [
-    {
-      "id": "task-1",
-      "description": "Clear description of what to do",
-      "dependencies": [],
-      "priority": 1
-    }
-  ]
-}
-
-IMPORTANT: dependencies array must ALWAYS be empty [] for parallel execution!
-
-Only respond with the JSON, no other text.`;
+Respond with ONLY a JSON array of ${workerCount} task descriptions, nothing else:
+["task 1 description", "task 2 description"]`;
 
   try {
     const response = await sendChatRequest({
@@ -69,7 +43,6 @@ Only respond with the JSON, no other text.`;
       storeId,
     });
 
-    // Read the streamed response
     let fullResponse = '';
     const reader = response.body?.getReader();
     if (!reader) throw new Error('No response body');
@@ -96,181 +69,60 @@ Only respond with the JSON, no other text.`;
       }
     }
 
-    // Extract JSON from response
-    const jsonMatch = fullResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error('No JSON found in response');
+    // Extract JSON array from response
+    const jsonMatch = fullResponse.match(/\[[\s\S]*\]/);
+    if (jsonMatch) {
+      const tasks = JSON.parse(jsonMatch[0]);
+      if (Array.isArray(tasks) && tasks.length > 0) {
+        return tasks.slice(0, workerCount);
+      }
     }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    const tasks: SwarmTask[] = parsed.tasks.map((t: any, index: number) => ({
-      id: t.id || `task-${index + 1}`,
-      description: t.description,
-      status: 'pending' as const,
-      priority: t.priority || index + 1,
-      dependencies: t.dependencies || [],
-      createdAt: Date.now(),
-      retryCount: 0,
-      maxRetries: 3,
-    }));
-
-    return tasks;
   } catch (err) {
     console.error('Failed to decompose goal:', err);
-    // Fallback: create a single task
-    return [{
-      id: 'task-1',
-      description: goal,
-      status: 'pending',
-      priority: 1,
-      dependencies: [],
-      createdAt: Date.now(),
-      retryCount: 0,
-      maxRetries: 3,
-    }];
   }
+
+  // Fallback: just use the goal for both workers
+  return [goal, goal];
 }
 
 /**
- * Start a new swarm
+ * Start a new swarm - the simple way
+ * Creates 2 Wilson instances side by side, each with part of the task
  */
 export async function startSwarm(config: SwarmConfig): Promise<SwarmState> {
   if (!isTmuxAvailable()) {
     throw new Error('tmux is required for swarm mode. Install with: brew install tmux');
   }
 
-  console.log(`\n🐝 Initializing swarm for goal: "${config.goal}"\n`);
+  console.log(`\n🐝 Starting swarm for: "${config.goal}"\n`);
 
   // Initialize IPC directory
   const paths = initSwarmDir(config.workingDirectory);
 
-  // Decompose the goal into tasks
-  console.log('📋 Decomposing goal into tasks...');
+  // Decompose the goal into 2 tasks
+  console.log('📋 Splitting task for workers...');
   const tasks = await decomposeGoal(
     config.goal,
     config.accessToken,
     config.storeId,
-    config.workerCount
+    2 // Always 2 workers for clean layout
   );
-  console.log(`   Created ${tasks.length} tasks\n`);
-
-  // Spawn tmux session
-  console.log('🖥️  Spawning tmux session...');
-  const state = spawnSwarm(config);
-  state.goalQueue = tasks;
-
-  // Write initial state
-  await writeState(paths, state);
-
-  // Push tasks to goal queue
-  await pushManyToGoalQueue(paths, tasks);
-
-  // Update state to running
-  await updateState(paths, s => ({
-    ...s,
-    status: 'running',
-    startedAt: Date.now(),
-  }));
-
-  console.log(`   Session: ${state.tmuxSession}`);
-  console.log(`   Workers: ${state.workers.length}`);
+  console.log(`   Task 1: ${tasks[0]?.slice(0, 50)}...`);
+  console.log(`   Task 2: ${tasks[1]?.slice(0, 50)}...`);
   console.log('');
 
-  // Launch processes in panes
-  console.log('🚀 Launching workers and validator...');
-  launchSwarmProcesses(state);
+  // Create tmux session with 2 panes
+  console.log('🖥️  Creating tmux session...');
+  const state = spawnSwarm(config);
+
+  // Save state
+  await writeState(paths, state);
+
+  // Launch Wilson in each pane with its task
+  console.log('🚀 Launching workers...\n');
+  launchSwarmProcesses(state, tasks);
 
   return state;
-}
-
-/**
- * Monitor swarm progress (called from commander pane)
- */
-export async function monitorSwarm(workingDirectory: string): Promise<void> {
-  const paths = getIPCPaths(workingDirectory);
-
-  console.log('👁️  Swarm Monitor Active');
-  console.log('Press Ctrl+C to stop monitoring\n');
-
-  let lastProgress = -1;
-
-  while (true) {
-    const state = readState(paths);
-    if (!state) {
-      console.log('No swarm state found');
-      break;
-    }
-
-    // Check for messages
-    const messages = readMessagesFor(paths, 'commander');
-    for (const msg of messages) {
-      if (msg.type === 'validation_result') {
-        const payload = msg.payload as { taskId: string; passed: boolean; reason?: string };
-        if (payload.passed) {
-          console.log(`✓ Task validated: ${payload.taskId}`);
-        } else {
-          console.log(`✗ Task failed validation: ${payload.taskId} - ${payload.reason}`);
-        }
-      }
-    }
-    await clearMessagesFor(paths, 'commander');
-
-    // Update progress display
-    const progress = calculateProgress(state);
-    if (progress !== lastProgress) {
-      lastProgress = progress;
-      printProgress(state, progress);
-    }
-
-    // Check if complete
-    if (state.status === 'completed') {
-      console.log('\n🎉 Swarm completed successfully!');
-      console.log(`   Tasks completed: ${state.completedTasks.length}`);
-      console.log(`   Tasks failed: ${state.failedTasks.length}`);
-      break;
-    }
-
-    if (state.status === 'failed') {
-      console.log('\n❌ Swarm failed');
-      break;
-    }
-
-    await sleep(1000);
-  }
-}
-
-/**
- * Print progress bar and status
- */
-function printProgress(state: SwarmState, progress: number): void {
-  const width = 40;
-  const filled = Math.round((progress / 100) * width);
-  const bar = '█'.repeat(filled) + '░'.repeat(width - filled);
-
-  console.clear();
-  console.log('┌─────────────────────────────────────────────────┐');
-  console.log(`│ SWARM: ${state.goal.slice(0, 40).padEnd(40)} │`);
-  console.log('├─────────────────────────────────────────────────┤');
-  console.log(`│ Progress: [${bar}] ${progress}%    │`);
-  console.log('├─────────────────────────────────────────────────┤');
-
-  // Worker status
-  for (const worker of state.workers) {
-    const statusIcon = {
-      idle: '⏸',
-      working: '⚡',
-      waiting: '⏳',
-      completed: '✓',
-      failed: '✗',
-    }[worker.status];
-    const task = worker.currentTaskId ?
-      state.goalQueue.find(t => t.id === worker.currentTaskId)?.description.slice(0, 25) || '' : '';
-    console.log(`│ ${statusIcon} ${worker.name.padEnd(10)} ${task.padEnd(35)} │`);
-  }
-
-  console.log('├─────────────────────────────────────────────────┤');
-  console.log(`│ Completed: ${state.completedTasks.length}  Failed: ${state.failedTasks.length}  Pending: ${state.goalQueue.filter(t => t.status === 'pending').length}         │`);
-  console.log('└─────────────────────────────────────────────────┘');
 }
 
 /**
@@ -278,42 +130,37 @@ function printProgress(state: SwarmState, progress: number): void {
  */
 export async function stopSwarm(workingDirectory: string): Promise<void> {
   const paths = getIPCPaths(workingDirectory);
-  const state = readState(paths);
 
-  if (!state) {
-    console.log('No swarm found');
-    return;
+  // Try to read state to get session name
+  try {
+    const { readState } = await import('./queue.js');
+    const state = readState(paths);
+    if (state?.tmuxSession) {
+      killSession(state.tmuxSession);
+    }
+  } catch {
+    // State might not exist
   }
 
-  console.log('Stopping swarm...');
-
-  // Update state
-  await updateState(paths, s => ({
-    ...s,
-    status: 'failed',
-  }));
-
-  // Kill tmux session
-  killSession(state.tmuxSession);
-
-  // Cleanup
+  // Cleanup directory
   cleanupSwarmDir(workingDirectory);
-
   console.log('Swarm stopped');
 }
 
 /**
- * Get swarm status
+ * Get swarm status (for /swarm status command)
  */
 export function getSwarmStatus(workingDirectory: string): SwarmState | null {
+  const { readState } = require('./queue.js');
   const paths = getIPCPaths(workingDirectory);
   return readState(paths);
 }
 
-// =============================================================================
-// Helpers
-// =============================================================================
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Monitor swarm (not really needed in simple mode)
+ */
+export async function monitorSwarm(workingDirectory: string): Promise<void> {
+  console.log('Swarm monitor - press Ctrl+C to exit');
+  // In simple mode, just wait - the tmux session shows everything
+  await new Promise(() => {}); // Wait forever
 }

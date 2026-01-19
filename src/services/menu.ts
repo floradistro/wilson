@@ -34,10 +34,8 @@ const DEFAULT_MENU: MenuConfig = {
   slash: [
     { id: '10', menu_type: 'slash', item_id: 'new', label: 'new', description: 'Start fresh conversation', action: 'command', value: '/new', sort_order: 10, is_active: true },
     { id: '11', menu_type: 'slash', item_id: 'stores', label: 'stores', description: 'Switch store', action: 'command', value: '/stores', sort_order: 20, is_active: true },
-    { id: '12', menu_type: 'slash', item_id: 'config', label: 'config', description: 'View current settings', action: 'command', value: '/config', sort_order: 22, is_active: true },
-    { id: '13', menu_type: 'slash', item_id: 'config edit', label: 'config edit', description: 'Edit settings.json', action: 'command', value: '/config edit', sort_order: 23, is_active: true },
-    { id: '14', menu_type: 'slash', item_id: 'rules', label: 'rules', description: 'View WILSON.md rules', action: 'command', value: '/rules', sort_order: 24, is_active: true },
-    { id: '15', menu_type: 'slash', item_id: 'rules edit', label: 'rules edit', description: 'Edit WILSON.md', action: 'command', value: '/rules edit', sort_order: 25, is_active: true },
+    { id: '12', menu_type: 'slash', item_id: 'config', label: 'config', description: 'View and edit settings', action: 'command', value: '/config', sort_order: 22, is_active: true },
+    { id: '13', menu_type: 'slash', item_id: 'rules', label: 'rules', description: 'View and edit rules', action: 'command', value: '/rules', sort_order: 24, is_active: true },
     { id: '16', menu_type: 'slash', item_id: 'location', label: 'location', description: 'Switch location', action: 'command', value: '/location', sort_order: 30, is_active: true },
     { id: '17', menu_type: 'slash', item_id: 'refresh', label: 'refresh', description: 'Sync from server', action: 'command', value: '/refresh', sort_order: 35, is_active: true },
     { id: '18', menu_type: 'slash', item_id: 'context', label: 'context', description: 'Show context usage', action: 'command', value: '/context', sort_order: 40, is_active: true },
