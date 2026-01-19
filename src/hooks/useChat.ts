@@ -159,22 +159,21 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Only detect TRUE loops - identical calls repeated consecutively
-    // A loop is when the AI does the EXACT same thing 3+ times in a row
-    // This allows unlimited different calls (analytics with different query_types, etc.)
+    // LOOP DETECTION: Only catch true loops (identical consecutive calls)
+    // Anthropic pattern: allow unlimited DIFFERENT calls, stop on REPETITION
 
     if (sessionToolHistory.length >= 3) {
       const last3 = sessionToolHistory.slice(-3);
-      // All 3 must be IDENTICAL (same tool + same params hash)
+      // 3 identical calls in a row = stuck loop
       if (last3[0] === last3[1] && last3[1] === last3[2]) {
         const toolName = last3[0].split(':')[0];
-        setError(`Loop detected: ${toolName} repeated 3 times. Use /clear to reset.`);
+        setError(`Loop detected: ${toolName} repeated 3x. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
         return;
       }
     }
 
-    // Safety limit - high ceiling, only catches runaway agents
+    // Depth limit - only as ultimate safety net
     if (depth > 50) {
       setError('Maximum tool iterations reached (50). Use /clear to reset.');
       updateLastMessage({ isStreaming: false });
