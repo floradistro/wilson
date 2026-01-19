@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { config } from '../config.js';
 
 interface HeaderProps {
@@ -9,7 +9,10 @@ interface HeaderProps {
 }
 
 export function Header({ storeName, userEmail, messageCount = 0, showHints = true }: HeaderProps) {
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns || 80;
   const userName = userEmail?.split('@')[0] || '';
+  const dividerWidth = Math.max(20, Math.min(termWidth - 4, 60));
 
   return (
     <Box flexDirection="column">
@@ -37,7 +40,7 @@ export function Header({ storeName, userEmail, messageCount = 0, showHints = tru
 
       {/* Separator */}
       <Box>
-        <Text color="#333333">{'─'.repeat(50)}</Text>
+        <Text color="#333333">{'─'.repeat(dividerWidth)}</Text>
       </Box>
     </Box>
   );

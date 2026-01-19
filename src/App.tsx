@@ -11,6 +11,9 @@ import { Footer } from './components/Footer.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
 import { config } from './config.js';
+import { COLORS } from './theme/colors.js';
+import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
+import { categorizeError, getStatusDuration } from './utils/errors.js';
 import type { Flags, PendingQuestion, PendingPermission } from './types.js';
 
 interface AppProps {
@@ -20,6 +23,13 @@ interface AppProps {
 }
 
 type ViewMode = 'chat' | 'help' | 'status';
+type StatusType = 'info' | 'success' | 'warning' | 'error' | 'complex';
+type LoadingStage = 'initializing' | 'authenticating' | 'loading_stores';
+
+interface StatusMessage {
+  text: string;
+  type: StatusType;
+}
 
 export function App({ initialQuery, flags, command }: AppProps) {
   const { exit } = useApp();
@@ -44,7 +54,20 @@ export function App({ initialQuery, flags, command }: AppProps) {
   const [inputValue, setInputValue] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [initialQuerySent, setInitialQuerySent] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
+  const [loadingStage, setLoadingStage] = useState<LoadingStage>('initializing');
+  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Helper to show status message with appropriate duration
+  const showStatus = useCallback((text: string, type: StatusType = 'info') => {
+    // Clear any existing timeout
+    if (statusTimeoutRef.current) {
+      clearTimeout(statusTimeoutRef.current);
+    }
+    setStatusMessage({ text, type });
+    const duration = getStatusDuration(type);
+    statusTimeoutRef.current = setTimeout(() => setStatusMessage(null), duration);
+  }, []);
 
   // State for interactive prompts
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestion | null>(null);
@@ -102,7 +125,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
   useEffect(() => {
     if (isAuthenticated && isInitialized && !command) {
       // Only check for updates in normal interactive mode
-      import('../services/updater.js').then(({ updater }) => {
+      import('./services/updater.js').then(({ updater }) => {
         updater.autoUpdate().catch(() => {
           // Silently ignore update check failures
         });
@@ -137,8 +160,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
     if (key.ctrl && input === 'l') {
       clearMessages();
-      setStatusMessage('Conversation cleared');
-      setTimeout(() => setStatusMessage(null), 2000);
+      showStatus('Conversation cleared', 'success');
       return;
     }
 
@@ -148,7 +170,10 @@ export function App({ initialQuery, flags, command }: AppProps) {
         return;
       }
       if (error) clearError();
-      if (statusMessage) setStatusMessage(null);
+      if (statusMessage) {
+        if (statusTimeoutRef.current) clearTimeout(statusTimeoutRef.current);
+        setStatusMessage(null);
+      }
       return;
     }
 
@@ -165,8 +190,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
       case '/new':
       case '/clear':
         clearMessages();
-        setStatusMessage('Conversation cleared');
-        setTimeout(() => setStatusMessage(null), 2000);
+        showStatus('Conversation cleared', 'success');
         return true;
 
       case '/status':
@@ -188,8 +212,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
       case '/stores':
       case '/store':
         if (stores.length <= 1) {
-          setStatusMessage('Only one store available');
-          setTimeout(() => setStatusMessage(null), 2000);
+          showStatus('Only one store available', 'info');
         } else {
           setSelectorMode('store');
         }
@@ -199,8 +222,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
       case '/location':
       case '/loc':
         if (locations.length === 0) {
-          setStatusMessage('No locations available for this store');
-          setTimeout(() => setStatusMessage(null), 2000);
+          showStatus('No locations available for this store', 'info');
         } else {
           setSelectorMode('location');
         }
@@ -208,27 +230,25 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
       case '/refresh':
       case '/sync':
-        setStatusMessage('Refreshing stores...');
+        showStatus('Refreshing stores...', 'info');
         refreshStores().then(() => {
-          setStatusMessage(`Synced: ${stores.length} stores`);
-          setTimeout(() => setStatusMessage(null), 2000);
+          showStatus(`Synced: ${stores.length} stores`, 'success');
         });
         return true;
 
       case '/context':
       case '/ctx': {
         const pct = ((contextTokens / 200000) * 100).toFixed(1);
-        const status = contextTokens > 180000 ? '[!] Critical' : contextTokens > 150000 ? '[!] Warning' : '[ok]';
-        setStatusMessage(`Context: ${(contextTokens / 1000).toFixed(1)}K / 200K tokens (${pct}%) ${status}`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        const ctxType: StatusType = contextTokens > 180000 ? 'error' : contextTokens > 150000 ? 'warning' : 'success';
+        const status = contextTokens > 180000 ? 'Critical' : contextTokens > 150000 ? 'Warning' : 'OK';
+        showStatus(`Context: ${(contextTokens / 1000).toFixed(1)}K / 200K tokens (${pct}%) [${status}]`, 'complex');
         return true;
       }
 
       case '/tokens': {
         const total = usage.inputTokens + usage.outputTokens;
         const cost = (usage.inputTokens * 0.000003 + usage.outputTokens * 0.000015).toFixed(4);
-        setStatusMessage(`Tokens: ↑${(usage.inputTokens/1000).toFixed(1)}K ↓${(usage.outputTokens/1000).toFixed(1)}K = ${(total/1000).toFixed(1)}K (~$${cost})`);
-        setTimeout(() => setStatusMessage(null), 5000);
+        showStatus(`Tokens: ↑${(usage.inputTokens/1000).toFixed(1)}K ↓${(usage.outputTokens/1000).toFixed(1)}K = ${(total/1000).toFixed(1)}K (~$${cost})`, 'complex');
         return true;
       }
 
@@ -239,9 +259,14 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   // Loading state - wait for auth store to initialize
   if (!isInitialized || authLoading) {
+    const loadingMessages: Record<LoadingStage, string> = {
+      initializing: 'Initializing...',
+      authenticating: 'Checking authentication...',
+      loading_stores: 'Loading stores...',
+    };
     return (
       <Box padding={1}>
-        <Spinner label="Loading..." />
+        <Spinner label={loadingMessages[loadingStage]} />
       </Box>
     );
   }
@@ -256,48 +281,52 @@ export function App({ initialQuery, flags, command }: AppProps) {
     return (
       <Box flexDirection="column" padding={1}>
         <Box marginBottom={1}>
-          <Text bold color="green">wilson</Text>
-          <Text dimColor> v{config.version}</Text>
+          <Text bold color={COLORS.primary}>wilson</Text>
+          <Text color={COLORS.textDim}> v{config.version}</Text>
         </Box>
 
         <Box flexDirection="column">
-          <Text bold color="white">Slash Commands</Text>
+          <Text bold color={COLORS.text}>Slash Commands</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>  <Text color="green">/new</Text>       <Text dimColor>Start fresh conversation</Text></Text>
-            <Text>  <Text color="green">/clear</Text>     <Text dimColor>Clear screen</Text></Text>
-            <Text>  <Text color="green">/stores</Text>    <Text dimColor>Switch store</Text></Text>
-            <Text>  <Text color="green">/location</Text>  <Text dimColor>Switch location</Text></Text>
-            <Text>  <Text color="green">/refresh</Text>   <Text dimColor>Sync stores from server</Text></Text>
-            <Text>  <Text color="green">/context</Text>   <Text dimColor>Show context window usage</Text></Text>
-            <Text>  <Text color="green">/tokens</Text>    <Text dimColor>Show token usage and cost</Text></Text>
-            <Text>  <Text color="green">/status</Text>    <Text dimColor>View connection status</Text></Text>
-            <Text>  <Text color="green">/help</Text>      <Text dimColor>Show this help</Text></Text>
-            <Text>  <Text color="green">/logout</Text>    <Text dimColor>Sign out</Text></Text>
+            {SLASH_COMMANDS.map(cmd => (
+              <Box key={cmd.name}>
+                <Text>  </Text>
+                <Text color={COLORS.primary}>/{cmd.name.padEnd(10)}</Text>
+                {cmd.aliases.length > 0 && (
+                  <Text color={COLORS.textVeryDim}> ({cmd.aliases.join(', ').padEnd(12)})</Text>
+                )}
+                {cmd.aliases.length === 0 && <Text color={COLORS.textVeryDim}>{' '.repeat(15)}</Text>}
+                <Text color={COLORS.textDim}> {cmd.description}</Text>
+              </Box>
+            ))}
           </Box>
         </Box>
 
         <Box marginTop={1} flexDirection="column">
-          <Text bold color="white">Keyboard Shortcuts</Text>
+          <Text bold color={COLORS.text}>Keyboard Shortcuts</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>  <Text>Ctrl+C</Text>  <Text dimColor>Exit</Text></Text>
-            <Text>  <Text>Ctrl+L</Text>  <Text dimColor>Clear chat</Text></Text>
-            <Text>  <Text>?</Text>       <Text dimColor>Toggle help</Text></Text>
-            <Text>  <Text>Esc</Text>     <Text dimColor>Go back / Dismiss</Text></Text>
+            {KEYBOARD_SHORTCUTS.map(shortcut => (
+              <Box key={shortcut.key}>
+                <Text>  </Text>
+                <Text color={COLORS.text}>{shortcut.key.padEnd(8)}</Text>
+                <Text color={COLORS.textDim}> {shortcut.description}</Text>
+              </Box>
+            ))}
           </Box>
         </Box>
 
         <Box marginTop={1} flexDirection="column">
-          <Text bold color="white">CLI Usage</Text>
+          <Text bold color={COLORS.text}>CLI Usage</Text>
           <Box marginTop={1} flexDirection="column">
-            <Text>  <Text>wilson</Text>           <Text dimColor>Start interactive mode</Text></Text>
-            <Text>  <Text>wilson "query"</Text>   <Text dimColor>Run a one-off query</Text></Text>
-            <Text>  <Text>wilson logout</Text>    <Text dimColor>Sign out</Text></Text>
-            <Text>  <Text>wilson version</Text>   <Text dimColor>Show version</Text></Text>
+            <Text>  <Text color={COLORS.text}>wilson</Text>           <Text color={COLORS.textDim}>Start interactive mode</Text></Text>
+            <Text>  <Text color={COLORS.text}>wilson "query"</Text>   <Text color={COLORS.textDim}>Run a one-off query</Text></Text>
+            <Text>  <Text color={COLORS.text}>wilson logout</Text>    <Text color={COLORS.textDim}>Sign out</Text></Text>
+            <Text>  <Text color={COLORS.text}>wilson version</Text>   <Text color={COLORS.textDim}>Show version</Text></Text>
           </Box>
         </Box>
 
         <Box marginTop={2}>
-          <Text dimColor>Press Esc or ? to close</Text>
+          <Text color={COLORS.textDim}>Press Esc or ? to close</Text>
         </Box>
       </Box>
     );
@@ -308,46 +337,46 @@ export function App({ initialQuery, flags, command }: AppProps) {
     return (
       <Box flexDirection="column" padding={1}>
         <Box marginBottom={1}>
-          <Text bold color="green">wilson</Text>
-          <Text dimColor> - Status</Text>
+          <Text bold color={COLORS.primary}>wilson</Text>
+          <Text color={COLORS.textDim}> - Status</Text>
         </Box>
 
         <Box flexDirection="column">
           <Box>
-            <Text dimColor>{'Store     '}</Text>
-            <Text color="white">{storeName || 'Unknown'}</Text>
-            {stores.length > 1 && <Text dimColor> ({stores.length} stores)</Text>}
+            <Text color={COLORS.textDim}>{'Store     '}</Text>
+            <Text color={COLORS.text}>{storeName || 'Unknown'}</Text>
+            {stores.length > 1 && <Text color={COLORS.textDim}> ({stores.length} stores)</Text>}
           </Box>
           {currentLocation && (
             <Box>
-              <Text dimColor>{'Location  '}</Text>
-              <Text color="white">{currentLocation.name}</Text>
+              <Text color={COLORS.textDim}>{'Location  '}</Text>
+              <Text color={COLORS.text}>{currentLocation.name}</Text>
             </Box>
           )}
           <Box>
-            <Text dimColor>{'Account   '}</Text>
-            <Text color="white">{user?.email || 'Unknown'}</Text>
+            <Text color={COLORS.textDim}>{'Account   '}</Text>
+            <Text color={COLORS.text}>{user?.email || 'Unknown'}</Text>
           </Box>
           <Box>
-            <Text dimColor>{'Auth      '}</Text>
+            <Text color={COLORS.textDim}>{'Auth      '}</Text>
             {isAuthenticated ? (
-              <><Text color="green">{'●'}</Text><Text dimColor> Connected</Text></>
+              <><Text color={COLORS.success}>● Connected</Text></>
             ) : (
-              <><Text color="yellow">{'○'}</Text><Text dimColor> Not connected</Text></>
+              <><Text color={COLORS.warning}>○ Not connected</Text></>
             )}
           </Box>
           <Box>
-            <Text dimColor>{'Messages  '}</Text>
-            <Text color="white">{messages.length}</Text>
+            <Text color={COLORS.textDim}>{'Messages  '}</Text>
+            <Text color={COLORS.text}>{messages.length}</Text>
           </Box>
           <Box>
-            <Text dimColor>{'Version   '}</Text>
-            <Text color="white">v{config.version}</Text>
+            <Text color={COLORS.textDim}>{'Version   '}</Text>
+            <Text color={COLORS.text}>v{config.version}</Text>
           </Box>
         </Box>
 
         <Box marginTop={2}>
-          <Text dimColor>Press Esc to close</Text>
+          <Text color={COLORS.textDim}>Press Esc to close</Text>
         </Box>
       </Box>
     );
@@ -365,9 +394,13 @@ export function App({ initialQuery, flags, command }: AppProps) {
       if (handleSlashCommand(trimmed)) {
         return;
       }
-      // Unknown slash command, show error
-      setStatusMessage(`Unknown command: ${trimmed}`);
-      setTimeout(() => setStatusMessage(null), 2000);
+      // Unknown slash command - suggest similar commands
+      const suggestions = findSimilarCommands(trimmed);
+      if (suggestions.length > 0) {
+        showStatus(`Unknown command: ${trimmed}. Did you mean: /${suggestions.join(', /')}?`, 'warning');
+      } else {
+        showStatus(`Unknown command: ${trimmed}. Type /help for available commands.`, 'warning');
+      }
       return;
     }
 
@@ -381,39 +414,79 @@ export function App({ initialQuery, flags, command }: AppProps) {
   // Show all messages - don't filter during streaming
   const displayMessages = messages;
 
+  // Get status icon based on type
+  const getStatusIcon = (type: StatusType) => {
+    switch (type) {
+      case 'success': return '✓';
+      case 'error': return '✗';
+      case 'warning': return '!';
+      case 'complex': return '◆';
+      default: return '•';
+    }
+  };
+
+  const getStatusColor = (type: StatusType) => {
+    switch (type) {
+      case 'success': return COLORS.success;
+      case 'error': return COLORS.error;
+      case 'warning': return COLORS.warning;
+      default: return COLORS.info;
+    }
+  };
+
   return (
     <Box flexDirection="column">
-      {/* Compact header */}
-      <Box paddingX={1}>
-        <Text bold color="#7DC87D">wilson</Text>
-        <Text color="#444444"> v{config.version}</Text>
-        {storeName && <Text color="#444444"> • {storeName}</Text>}
-        {currentLocation && <Text color="#555555"> @ {currentLocation.name}</Text>}
+      {/* Minimal header - with breathing room */}
+      <Box paddingX={1} marginBottom={1}>
+        <Text bold color={COLORS.primary}>wilson</Text>
+        <Text color={COLORS.textDisabled}> │ </Text>
+        {storeName && (
+          <>
+            <Text color={COLORS.textMuted}>{storeName}</Text>
+            {currentLocation && (
+              <>
+                <Text color={COLORS.textVeryDim}> → </Text>
+                <Text color={COLORS.textDim}>{currentLocation.name}</Text>
+              </>
+            )}
+          </>
+        )}
       </Box>
 
       {/* Status message */}
       {statusMessage && (
-        <Box paddingX={1}>
-          <Text color="#7DC87D">✓</Text>
-          <Text color="#666666"> {statusMessage}</Text>
+        <Box paddingX={1} marginBottom={1}>
+          <Text color={getStatusColor(statusMessage.type)}>{getStatusIcon(statusMessage.type)}</Text>
+          <Text color={COLORS.textMuted}> {statusMessage.text}</Text>
+          <Text color={COLORS.textVeryDim}> (esc)</Text>
         </Box>
       )}
 
       {/* Todo List */}
-      {todos.length > 0 && <Box paddingX={1}><TodoList todos={todos} /></Box>}
+      {todos.length > 0 && <Box paddingX={1} marginBottom={1}><TodoList todos={todos} /></Box>}
 
-      {/* Chat Messages - no extra spacing */}
-      <Box paddingX={1} flexDirection="column">
+      {/* Chat Messages - generous spacing */}
+      <Box paddingX={1} flexDirection="column" marginBottom={1}>
         <Chat messages={displayMessages} isStreaming={isStreaming} />
       </Box>
 
-      {/* Error Display */}
-      {error && (
-        <Box paddingX={1}>
-          <Text color="#E07070">✗ {error}</Text>
-          <Text color="#555555"> (esc)</Text>
-        </Box>
-      )}
+      {/* Error Display with categorization */}
+      {error && (() => {
+        const categorized = categorizeError(error);
+        return (
+          <Box paddingX={1} flexDirection="column">
+            <Box>
+              <Text color={COLORS.error}>{categorized.icon} {categorized.message}</Text>
+              <Text color={COLORS.textDim}> (esc)</Text>
+            </Box>
+            {categorized.suggestion && (
+              <Box marginLeft={2}>
+                <Text color={COLORS.info}>→ {categorized.suggestion}</Text>
+              </Box>
+            )}
+          </Box>
+        );
+      })()}
 
       {/* Ask User Prompt */}
       {pendingQuestion && (
@@ -450,16 +523,14 @@ export function App({ initialQuery, flags, command }: AppProps) {
             onSelectStore={async (newStoreId) => {
               const success = await switchStore(newStoreId);
               if (success) {
-                setStatusMessage(`Switched to ${stores.find(s => s.storeId === newStoreId)?.storeName}`);
-                setTimeout(() => setStatusMessage(null), 2000);
+                showStatus(`Switched to ${stores.find(s => s.storeId === newStoreId)?.storeName}`, 'success');
               }
               setSelectorMode(null);
             }}
             onSelectLocation={(locationId) => {
               setLocation(locationId);
               const loc = locations.find(l => l.id === locationId);
-              setStatusMessage(loc ? `Location: ${loc.name}` : 'Location cleared');
-              setTimeout(() => setStatusMessage(null), 2000);
+              showStatus(loc ? `Location: ${loc.name}` : 'Location cleared', 'success');
               setSelectorMode(null);
             }}
             onCancel={() => setSelectorMode(null)}

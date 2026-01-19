@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { Spinner } from './Spinner.js';
 import { authStore } from '../stores/authStore.js';
+import { COLORS } from '../theme/colors.js';
 
 interface LoginProps {
   onSuccess: () => void;
@@ -96,29 +97,29 @@ export function Login({ onSuccess }: LoginProps) {
   return (
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
-        <Text bold color="green">wilson</Text>
-        <Text dimColor> - Login</Text>
+        <Text bold color={COLORS.primary}>wilson</Text>
+        <Text color={COLORS.textDim}> - Login</Text>
       </Box>
 
       {error && (
         <Box marginBottom={1}>
-          <Text color="red">{error}</Text>
+          <Text color={COLORS.error}>✗ {error}</Text>
         </Box>
       )}
 
       {/* Email input */}
       <Box>
-        <Text color={stage === 'email' ? 'blue' : 'gray'}>Email: </Text>
-        <Text>{email}</Text>
-        {stage === 'email' && <Text color="green">|</Text>}
+        <Text color={stage === 'email' ? COLORS.info : COLORS.textMuted}>Email: </Text>
+        <Text color={COLORS.text}>{email}</Text>
+        {stage === 'email' && <Text color={COLORS.primary}>|</Text>}
       </Box>
 
       {/* Password input */}
       {(stage === 'password' || stage === 'loading') && (
         <Box>
-          <Text color={stage === 'password' ? 'blue' : 'gray'}>Password: </Text>
-          <Text>{'*'.repeat(password.length)}</Text>
-          {stage === 'password' && <Text color="green">|</Text>}
+          <Text color={stage === 'password' ? COLORS.info : COLORS.textMuted}>Password: </Text>
+          <Text color={COLORS.text}>{'*'.repeat(password.length)}</Text>
+          {stage === 'password' && <Text color={COLORS.primary}>|</Text>}
         </Box>
       )}
 
@@ -131,7 +132,7 @@ export function Login({ onSuccess }: LoginProps) {
 
       {/* Help text */}
       <Box marginTop={1}>
-        <Text dimColor>
+        <Text color={COLORS.textDim}>
           {stage === 'email' && 'Enter your email and press Enter'}
           {stage === 'password' && 'Enter your password and press Enter (Esc to go back)'}
         </Text>

@@ -5,6 +5,7 @@ import path from 'path'
 import os from 'os'
 import { createWriteStream } from 'fs'
 import { pipeline } from 'stream/promises'
+import { config } from '../config.js'
 
 interface WilsonRelease {
   version: string
@@ -16,8 +17,8 @@ interface WilsonRelease {
 
 export class WilsonUpdater {
   private supabase = createClient(
-    process.env.SUPABASE_URL || 'https://uaednwpxursknmwdeejn.supabase.co',
-    process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVhZWRud3B4dXJza25td2RlZWpuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3MzMzNzUwNDYsImV4cCI6MjA0ODk1MTA0Nn0.sUqFOhFKtQdHhA1YvTL_vfXW-qf5HSq6zVoYBRUcLmc'
+    config.apiUrl,
+    config.anonKey
   )
 
   private currentVersion = this.getCurrentVersion()

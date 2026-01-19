@@ -3,6 +3,7 @@ import { join } from 'path';
 import { config } from '../config.js';
 import { getToolSchemas } from '../tools/index.js';
 import { getMcpClient } from './mcp.js';
+import { processHistoryForApi, getContextManagementConfig } from '../utils/context-manager.js';
 import type { StoreInfo, ToolSchema } from '../types.js';
 
 // =============================================================================
@@ -38,10 +39,16 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   // Only send local tools - backend already has MCP tools
   const localTools = getToolSchemas();
 
+  // Process history to truncate large tool inputs/outputs (client-side optimization)
+  const processedHistory = processHistoryForApi(conversationHistory);
+
+  // Server-side context management config (safety net)
+  const contextManagement = getContextManagementConfig();
+
   const body = {
     message,
-    // Send full conversation history - backend expects 'history' not 'conversation_messages'
-    history: conversationHistory,
+    // Send processed conversation history with truncated tool content
+    history: processedHistory,
     store_id: storeId,
     working_directory: process.cwd(),
     platform: process.platform,
@@ -52,6 +59,8 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,
     project_context: projectContext,
+    // Server-side context management (safety net for token overflow)
+    context_management: contextManagement,
     style_instructions: `Terminal CLI. STRICT FORMAT RULES:
 
 NEVER USE: ** markers, emojis, "interactive charts", "visualization"

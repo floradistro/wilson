@@ -1,5 +1,7 @@
 import type { Flags } from '../types.js';
 import { config } from '../config.js';
+import { SLASH_COMMANDS, CLI_COMMANDS, CLI_FLAGS, KEYBOARD_SHORTCUTS } from '../help/commands.js';
+import { COLORS } from '../theme/colors.js';
 
 interface ParsedArgs {
   query?: string;
@@ -36,33 +38,45 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 export function printHelp(): void {
+  const green = '\x1b[32m';
+  const dim = '\x1b[2m';
+  const bold = '\x1b[1m';
+  const reset = '\x1b[0m';
+
   console.log(`
-wilson v${config.version} - AI-powered CLI assistant
+${green}${bold}wilson${reset} ${dim}v${config.version}${reset} - AI-powered CLI assistant
 
-Usage:
-  wilson [query]              Run a query
-  wilson                      Start interactive mode
-  wilson login                Login to your account
-  wilson logout               Clear authentication
-  wilson update               Update to latest version
-  wilson check-updates        Check for available updates
+${bold}Usage:${reset}`);
 
-Options:
-  -h, --help                  Show this help message
-  -v, --version               Show version
-  -V, --verbose               Enable verbose output
-  --dangerously-skip-permissions  Skip all permission prompts
+  // CLI Commands
+  for (const cmd of CLI_COMMANDS) {
+    console.log(`  ${cmd.command.padEnd(24)} ${dim}${cmd.description}${reset}`);
+  }
 
-Examples:
+  console.log(`
+${bold}Options:${reset}`);
+  for (const flag of CLI_FLAGS) {
+    console.log(`  ${flag.flag.padEnd(32)} ${dim}${flag.description}${reset}`);
+  }
+
+  console.log(`
+${bold}Slash Commands:${reset} ${dim}(in interactive mode)${reset}`);
+  for (const cmd of SLASH_COMMANDS) {
+    const aliases = cmd.aliases.length > 0 ? ` ${dim}(${cmd.aliases.join(', ')})${reset}` : '';
+    console.log(`  ${green}/${cmd.name.padEnd(12)}${reset}${aliases.padEnd(20)} ${dim}${cmd.description}${reset}`);
+  }
+
+  console.log(`
+${bold}Keyboard Shortcuts:${reset}`);
+  for (const shortcut of KEYBOARD_SHORTCUTS) {
+    console.log(`  ${shortcut.key.padEnd(10)} ${dim}${shortcut.description}${reset}`);
+  }
+
+  console.log(`
+${bold}Examples:${reset}
   wilson "list files in src"
   wilson "create a new React component"
   wilson
-
-Keyboard Shortcuts (interactive mode):
-  Ctrl+C   Exit
-  Ctrl+L   Clear chat
-  ?        Toggle help
-  Esc      Dismiss errors
 `);
 }
 

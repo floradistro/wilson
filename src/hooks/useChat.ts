@@ -4,6 +4,7 @@ import { useStream, type StreamEvent } from './useStream.js';
 import { useTools } from './useTools.js';
 import { sendChatRequest } from '../services/api.js';
 import { compactConversation } from '../utils/context.js';
+import { truncateAssistantContent } from '../utils/context-manager.js';
 import { log } from '../utils/logger.js';
 
 // Throttle function for streaming updates
@@ -192,11 +193,12 @@ export function useChat() {
     // Structured data from tool results (for rendering charts/tables)
     const toolDataResults: ToolData[] = [];
 
-    // Throttled update for streaming text (100ms) - reduces terminal thrashing
+    // Throttled update for streaming text (50ms) - balance between smoothness and responsiveness
+    // Lower values = more responsive but more CPU, higher = smoother but laggy feel
     const throttledUpdate = createThrottle((text: string, chars: number) => {
       setStreamingChars(chars);
       updateLastMessage({ content: text });
-    }, 100);
+    }, 50);
 
     // Process stream
     for await (const event of processStream(response)) {
@@ -338,8 +340,10 @@ export function useChat() {
       const updatedHistory = [...conversationHistory];
 
       // Add assistant's response (includes tool_use blocks)
+      // Truncate large tool_use inputs (Write content, etc.) to prevent token overflow
       if (assistantContentFromBackend && assistantContentFromBackend.length > 0) {
-        updatedHistory.push({ role: 'assistant', content: assistantContentFromBackend });
+        const truncatedContent = truncateAssistantContent(assistantContentFromBackend);
+        updatedHistory.push({ role: 'assistant', content: truncatedContent });
       }
 
       // Add tool results as user message

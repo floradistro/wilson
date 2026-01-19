@@ -1,31 +1,13 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
-import { Box, Text, Static } from 'ink';
-import { highlight } from 'cli-highlight';
-import chalk from 'chalk';
+import { Box, Text, Static, useStdout } from 'ink';
 import type { Message, ToolCall, ToolData } from '../types.js';
 import { Markdown } from './Markdown.js';
 import { ChartRenderer, hasChartData } from './charts/ChartRenderer.js';
+import { COLORS } from '../theme/colors.js';
 
-const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-
-// Syntax highlighting theme
-const theme = {
-  keyword: chalk.hex('#C792EA'),
-  built_in: chalk.hex('#82AAFF'),
-  type: chalk.hex('#FFCB6B'),
-  literal: chalk.hex('#F78C6C'),
-  number: chalk.hex('#F78C6C'),
-  string: chalk.hex('#C3E88D'),
-  comment: chalk.hex('#546E7A'),
-  function: chalk.hex('#82AAFF'),
-  operator: chalk.hex('#89DDFF'),
-};
-
-interface DiffLine {
-  type: 'context' | 'add' | 'remove';
-  content: string;
-  lineNum?: number;
-}
+// ============================================================================
+// Chat Container
+// ============================================================================
 
 interface ChatProps {
   messages: Message[];
@@ -35,438 +17,443 @@ interface ChatProps {
 export const Chat = memo(function Chat({ messages }: ChatProps) {
   if (!messages.length) return null;
 
-  // Split messages: static (completed) vs dynamic (streaming/last)
-  const { staticMessages, dynamicMessages } = useMemo(() => {
-    // All messages except the last assistant message go to static
-    // The last message (if streaming or assistant) stays dynamic
+  const { staticMessages, dynamicMessage } = useMemo(() => {
     const lastIdx = messages.length - 1;
     const lastMsg = messages[lastIdx];
 
-    // If last message is streaming, keep it dynamic
     if (lastMsg?.isStreaming) {
       return {
         staticMessages: messages.slice(0, -1),
-        dynamicMessages: [lastMsg],
+        dynamicMessage: lastMsg,
       };
     }
 
-    // Otherwise all messages are static (fully rendered)
-    return {
-      staticMessages: messages,
-      dynamicMessages: [],
-    };
+    return { staticMessages: messages, dynamicMessage: null };
   }, [messages]);
 
   return (
     <Box flexDirection="column">
-      {/* Static messages - rendered once, never re-render */}
       {staticMessages.length > 0 && (
         <Static items={staticMessages}>
-          {(m, i) => (
-            <MessageItem key={m.id} message={m} isLast={false} />
-          )}
+          {(m) => <MessageItem key={m.id} message={m} />}
         </Static>
       )}
-
-      {/* Dynamic message - the one currently streaming */}
-      {dynamicMessages.map((m) => (
-        <MessageItem key={m.id} message={m} isLast={true} />
-      ))}
+      {dynamicMessage && <MessageItem key={dynamicMessage.id} message={dynamicMessage} />}
     </Box>
   );
 });
 
-const MessageItem = memo(function MessageItem({ message, isLast }: { message: Message; isLast?: boolean }) {
+// ============================================================================
+// Message Item
+// ============================================================================
+
+const MessageItem = memo(function MessageItem({ message }: { message: Message }) {
   const isUser = message.role === 'user';
   const hasTools = !isUser && message.toolCalls && message.toolCalls.length > 0;
 
-  // Get first chart data only (dedupe by taking first)
   const chartData = useMemo(() => {
     if (!message.toolData?.length) return null;
     const first = message.toolData.find(td => hasChartData(td.data));
     return first ? first.data : null;
   }, [message.toolData]);
 
-  // Only show text if NO chart (chart replaces verbose text)
   const showText = !isUser && message.content?.trim() && !chartData;
 
   return (
-    <Box flexDirection="column" marginBottom={isLast ? 0 : 2}>
+    <Box flexDirection="column" marginBottom={1}>
       {/* User message */}
       {isUser && (
-        <Box marginBottom={1}>
-          <Text color="#7DC87D" bold>❯ </Text>
-          <Text color="#E8E8E8">{String(message.content || '')}</Text>
-        </Box>
+        <Text>
+          <Text color={COLORS.textMuted}>&gt; </Text>
+          <Text color={COLORS.text}>{String(message.content || '')}</Text>
+        </Text>
       )}
 
-      {/* Tool status */}
+      {/* Tool calls */}
       {hasTools && (
-        <Box flexDirection="column" marginLeft={2}>
-          {message.toolCalls!.map((t, i) => (
-            <ToolItem key={`${t.id}-${i}`} tool={t} isFirst={i === 0} />
+        <Box flexDirection="column">
+          {message.toolCalls!.map((tool) => (
+            <ToolItem key={tool.id} tool={tool} />
           ))}
         </Box>
       )}
 
-      {/* Single chart from tool result */}
+      {/* Charts */}
       {chartData && (
-        <Box marginLeft={2} marginTop={hasTools ? 1 : 0}>
+        <Box marginLeft={2} marginTop={1}>
           <ChartRenderer data={chartData} />
         </Box>
       )}
 
-      {/* Assistant text - only if no chart */}
+      {/* Assistant text */}
       {showText && (
         <Box marginTop={hasTools ? 1 : 0} marginLeft={2}>
-          <StreamingText text={String(message.content)} isStreaming={message.isStreaming || false} skipMetrics={true} />
+          <Markdown streaming={message.isStreaming || false} skipMetrics={true}>
+            {String(message.content)}
+          </Markdown>
         </Box>
       )}
     </Box>
   );
 });
 
-const ToolItem = memo(function ToolItem({ tool, isFirst }: { tool: ToolCall; isFirst?: boolean }) {
-  const [frame, setFrame] = useState(0);
+// ============================================================================
+// Tool Item - Claude Code Style with animated status dot
+// ============================================================================
+
+const ToolItem = memo(function ToolItem({ tool }: { tool: ToolCall }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [blink, setBlink] = useState(true);
   const startRef = useRef(Date.now());
   const isRunning = tool.status === 'running';
+  const isError = tool.status === 'error';
+  const isDone = tool.status === 'completed';
 
   useEffect(() => {
     if (!isRunning) return;
     startRef.current = Date.now();
-    const id = setInterval(() => setFrame(f => (f + 1) % SPINNER.length), 120);
+    const id = setInterval(() => {
+      setElapsed((Date.now() - startRef.current) / 1000);
+      setBlink(b => !b); // Toggle blink
+    }, 400); // Blink every 400ms
     return () => clearInterval(id);
   }, [isRunning]);
 
-  const elapsed = isRunning ? ((Date.now() - startRef.current) / 1000) : 0;
-  const icon = isRunning ? SPINNER[frame] : tool.status === 'completed' ? '✓' : tool.status === 'error' ? '✗' : '○';
-  const iconColor = isRunning ? '#FFCB6B' : tool.status === 'completed' ? '#7DC87D' : tool.status === 'error' ? '#E07070' : '#555';
+  // Animated dot for running, solid for completed/error
+  const dotColor = isRunning
+    ? (blink ? COLORS.warning : COLORS.textDim) // Blink yellow/dim
+    : isDone
+      ? COLORS.success
+      : isError
+        ? COLORS.error
+        : COLORS.textDim;
 
-  const { label, preview, previewLang } = formatToolInfo(tool.name, tool.input);
-  const { output, outputLang } = formatToolOutput(tool);
-  const err = tool.status === 'error' && tool.result?.error;
-  const diff = tool.status === 'completed' && tool.result?.diff;
+  const { header, detail } = formatTool(tool);
 
   return (
-    <Box flexDirection="column" marginTop={isFirst ? 0 : 1}>
-      {/* Tool header */}
-      <Box>
-        <Text color={iconColor}>{icon} </Text>
-        <Text color="#89DDFF">{label}</Text>
-        {isRunning && elapsed > 0.5 && <Text color="#555"> {elapsed.toFixed(1)}s</Text>}
-      </Box>
+    <Box flexDirection="column" marginTop={1}>
+      {/* Header: ● Action(path) */}
+      <Text>
+        <Text color={dotColor}>●</Text>
+        <Text> </Text>
+        <Text bold>{header}</Text>
+        {detail && <Text color={COLORS.textMuted}>({detail})</Text>}
+        {isRunning && elapsed > 0.5 && <Text color={COLORS.textDim}> {elapsed.toFixed(1)}s</Text>}
+      </Text>
 
-      {/* Input preview (SQL, code, etc.) */}
-      {preview && (
-        <Box marginLeft={2} marginTop={1}>
-          <CodePreview code={preview} lang={previewLang} maxLines={6} />
-        </Box>
-      )}
-
-      {/* Output with syntax highlighting */}
-      {output && !diff && (
-        <Box marginLeft={2} marginTop={1}>
-          <CodePreview code={output} lang={outputLang} maxLines={10} label="Output" />
-        </Box>
-      )}
-
-      {/* Error */}
-      {err && (
-        <Box marginLeft={2} marginTop={1}>
-          <Box flexDirection="column">
-            <Text color="#E07070" bold>Error:</Text>
-            <Text color="#E07070">{String(err).slice(0, 200)}</Text>
-          </Box>
-        </Box>
-      )}
-
-      {/* Diff view */}
-      {diff && (
-        <Box marginLeft={2} marginTop={1}>
-          <DiffView diff={diff} file={tool.result!.file} summary={tool.result!.summary} collapsed={diff.length > 8} />
-        </Box>
-      )}
+      {/* Result */}
+      <ToolResult tool={tool} />
     </Box>
   );
 });
 
-// Backend tool data item - renders charts/tables from structured results
-const ToolDataItem = memo(function ToolDataItem({ toolData, isFirst }: { toolData: ToolData; isFirst?: boolean }) {
-  const { toolName, data, elapsed_ms, isError } = toolData;
+// ============================================================================
+// Tool Result
+// ============================================================================
 
-  // Check if data has chart-renderable content
-  const chartable = data && hasChartData(data);
+const ToolResult = memo(function ToolResult({ tool }: { tool: ToolCall }) {
+  const { stdout } = useStdout();
+  const width = stdout?.columns || 80;
 
-  // Format tool name for display
-  const label = toolName.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  if (tool.status === 'running') return null;
 
-  return (
-    <Box flexDirection="column" marginTop={isFirst ? 0 : 1}>
-      {/* Header for backend tool result */}
-      <Box>
-        <Text color={isError ? '#E07070' : '#7DC87D'}>
-          {isError ? '✗' : '◆'}{' '}
-        </Text>
-        <Text color="#82AAFF">{label}</Text>
-        {elapsed_ms && <Text color="#555"> {(elapsed_ms / 1000).toFixed(1)}s</Text>}
-      </Box>
-
-      {/* Render chart if data supports it */}
-      {chartable && (
-        <Box marginLeft={2} marginTop={1}>
-          <ChartRenderer data={data} fallbackTitle={label} />
-        </Box>
-      )}
-
-      {/* Error display */}
-      {isError && typeof data === 'string' && (
-        <Box marginLeft={2} marginTop={1}>
-          <Text color="#E07070">{String(data).slice(0, 300)}</Text>
-        </Box>
-      )}
-    </Box>
-  );
-});
-
-// Format tool info with preview detection
-function formatToolInfo(name: string, input: Record<string, unknown>): { label: string; preview?: string; previewLang?: string } {
-  const n = name?.toLowerCase() || '';
-
-  if (n === 'read') {
-    const file = String(input?.file_path || '').split('/').pop() || '';
-    return { label: `Read ${file}` };
-  }
-
-  if (n === 'edit') {
-    const file = String(input?.file_path || '').split('/').pop() || '';
-    const oldStr = input?.old_string as string;
-    const newStr = input?.new_string as string;
-    // Show the change as a preview
-    if (oldStr && newStr) {
-      const preview = `- ${oldStr.split('\n').slice(0, 3).join('\n- ')}\n+ ${newStr.split('\n').slice(0, 3).join('\n+ ')}`;
-      return { label: `Edit ${file}`, preview, previewLang: detectLang(file) };
-    }
-    return { label: `Edit ${file}` };
-  }
-
-  if (n === 'write') {
-    const file = String(input?.file_path || '').split('/').pop() || '';
-    const content = input?.content as string;
-    if (content) {
-      const preview = content.split('\n').slice(0, 8).join('\n');
-      return { label: `Write ${file}`, preview, previewLang: detectLang(file) };
-    }
-    return { label: `Write ${file}` };
-  }
-
-  if (n === 'bash') {
-    const cmd = String(input?.command || '');
-    // Detect SQL in bash commands
-    if (isSqlCommand(cmd)) {
-      const sql = extractSql(cmd);
-      return { label: '$ psql', preview: sql, previewLang: 'sql' };
-    }
-    // Show command preview for longer commands
-    if (cmd.length > 60) {
-      return { label: '$ bash', preview: cmd, previewLang: 'bash' };
-    }
-    const short = cmd.length > 50 ? cmd.slice(0, 47) + '...' : cmd;
-    return { label: `$ ${short}` };
-  }
-
-  if (n === 'glob') return { label: `Glob "${input?.pattern || ''}"` };
-  if (n === 'grep') return { label: `Grep "${String(input?.pattern || '').slice(0, 25)}"` };
-  if (n === 'todowrite') return { label: `Update tasks (${(input?.todos as unknown[])?.length || 0})` };
-
-  return { label: name || 'Unknown' };
-}
-
-// Format tool output
-function formatToolOutput(tool: ToolCall): { output?: string; outputLang?: string } {
-  if (tool.status !== 'completed' || !tool.result) return {};
   const r = tool.result;
+  if (!r) return null;
 
-  // Skip if there's a diff (handled separately)
-  if (r.diff) return {};
+  // Error
+  if (tool.status === 'error' && r.error) {
+    return (
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.error}>{String(r.error).slice(0, width - 10)}</Text>
+      </Text>
+    );
+  }
 
-  // File content output
-  if (typeof r.content === 'string' && r.content.length > 0) {
+  // Diff (Edit/Write) - Claude Code style with backgrounds
+  if (r.diff && Array.isArray(r.diff) && r.diff.length > 0) {
+    return <DiffResult diff={r.diff} summary={r.summary as string} width={width} />;
+  }
+
+  // File content (Read)
+  if (r.content && typeof r.content === 'string') {
     const lines = r.content.split('\n');
-    if (lines.length > 1) {
-      // Detect if it's SQL output (table format)
-      if (r.content.includes('|') && r.content.includes('-+-')) {
-        return { output: r.content, outputLang: 'sql' };
-      }
-      // JSON output
-      if (r.content.trim().startsWith('{') || r.content.trim().startsWith('[')) {
-        return { output: r.content, outputLang: 'json' };
-      }
-      // Generic output
-      return { output: r.content, outputLang: 'text' };
-    }
+    const lineCount = r.lineCount || lines.length;
+    return (
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>Read {lineCount} lines</Text>
+      </Text>
+    );
   }
 
-  // Files list
-  if (Array.isArray(r.files) && r.files.length > 0) {
-    const fileList = r.files.slice(0, 15).join('\n');
-    const more = r.files.length > 15 ? `\n... ${r.files.length - 15} more` : '';
-    return { output: fileList + more, outputLang: 'text' };
+  // File list (Glob)
+  if (r.files && Array.isArray(r.files)) {
+    return <FileListResult files={r.files} width={width} />;
   }
 
-  // Simple message
-  if (typeof r.message === 'string') {
-    return { output: r.message };
+  // Bash output
+  if (r.stdout || r.output) {
+    const output = String(r.stdout || r.output || '');
+    return <BashResult output={output} exitCode={r.exitCode as number} width={width} />;
   }
 
-  return {};
-}
-
-// Detect if command contains SQL
-function isSqlCommand(cmd: string): boolean {
-  const sqlKeywords = /\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|WITH|FROM|WHERE|JOIN|GROUP BY|ORDER BY)\b/i;
-  return sqlKeywords.test(cmd);
-}
-
-// Extract SQL from a bash command
-function extractSql(cmd: string): string {
-  // Try to extract SQL from psql -c "..." or similar
-  const match = cmd.match(/(?:-c\s+['"]|<<['"]?EOF['"]?\n?)([\s\S]*?)(?:['"]|EOF)/i);
-  if (match) return match[1].trim();
-
-  // If the command itself looks like SQL
-  if (/^\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)/i.test(cmd)) {
-    return cmd;
+  // Grep matches
+  if (r.matches && Array.isArray(r.matches)) {
+    return <GrepResult matches={r.matches} width={width} />;
   }
 
-  return cmd;
-}
-
-// Detect language from filename
-function detectLang(filename: string): string {
-  const ext = filename.split('.').pop()?.toLowerCase() || '';
-  const langMap: Record<string, string> = {
-    sql: 'sql', ts: 'typescript', tsx: 'typescript', js: 'javascript', jsx: 'javascript',
-    py: 'python', rb: 'ruby', go: 'go', rs: 'rust', json: 'json', yaml: 'yaml',
-    yml: 'yaml', md: 'markdown', sh: 'bash', bash: 'bash', zsh: 'bash',
-    html: 'html', css: 'css', scss: 'scss', swift: 'swift',
-  };
-  return langMap[ext] || 'text';
-}
-
-// Code preview component with syntax highlighting
-const CodePreview = memo(function CodePreview({
-  code, lang, maxLines = 10, label
-}: { code: string; lang?: string; maxLines?: number; label?: string }) {
-  const lines = code.split('\n');
-  const truncated = lines.length > maxLines;
-  const showLines = truncated ? lines.slice(0, maxLines) : lines;
-  const showCode = showLines.join('\n');
-
-  let highlighted: string;
-  try {
-    highlighted = highlight(showCode, { language: lang || 'text', ignoreIllegals: true, theme });
-  } catch {
-    highlighted = showCode;
+  // Message
+  if (r.message && typeof r.message === 'string') {
+    return (
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>{r.message}</Text>
+      </Text>
+    );
   }
 
-  const hlLines = highlighted.split('\n');
+  // Success with no specific output
+  if (r.success) {
+    return (
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>Done</Text>
+      </Text>
+    );
+  }
 
-  return (
-    <Box flexDirection="column">
-      <Box>
-        <Text color="#444">╭─</Text>
-        {lang && <Text color="#546E7A"> {lang} </Text>}
-        {label && <Text color="#546E7A">{label} </Text>}
-      </Box>
-      {hlLines.map((line, i) => (
-        <Box key={i}>
-          <Text color="#444">│</Text>
-          <Text color="#3A3A3A">{String(i + 1).padStart(3)} </Text>
-          <Text>{line}</Text>
-        </Box>
-      ))}
-      {truncated && (
-        <Box>
-          <Text color="#444">│</Text>
-          <Text color="#546E7A">    ... {lines.length - maxLines} more lines</Text>
-        </Box>
-      )}
-      <Box>
-        <Text color="#444">╰─</Text>
-      </Box>
-    </Box>
-  );
+  return null;
 });
 
-// Diff view with syntax highlighting
-const DiffView = memo(function DiffView({
-  diff, file, summary, collapsed
-}: { diff: DiffLine[]; file?: string; summary?: string; collapsed?: boolean }) {
-  const show = collapsed ? diff.slice(0, 6) : diff.slice(0, 25);
-  const hidden = collapsed ? diff.length - 6 : Math.max(0, diff.length - 25);
+// ============================================================================
+// Diff Result - Claude Code style: compact, colored backgrounds
+// ============================================================================
+
+interface DiffLine {
+  type: 'context' | 'add' | 'remove';
+  content: string;
+  lineNum?: number;
+}
+
+const DiffResult = memo(function DiffResult({
+  diff, summary, width
+}: {
+  diff: DiffLine[];
+  summary?: string;
+  width: number;
+}) {
+  const maxLines = 20;
+  const show = diff.slice(0, maxLines);
+  const hidden = diff.length - maxLines;
+
+  // Find max line number for width calculation
+  const maxLineNum = Math.max(...show.map(l => l.lineNum || 0), 1);
+  const lnWidth = Math.max(3, String(maxLineNum).length);
+  const contentWidth = width - lnWidth - 4; // "123 + "
 
   return (
     <Box flexDirection="column">
-      {/* Header */}
-      <Box>
-        <Text color="#444">╭─</Text>
-        {file && <Text color="#82AAFF"> {file.split('/').pop()} </Text>}
-        {summary && <Text color="#546E7A">({summary})</Text>}
-      </Box>
+      {/* Summary line */}
+      {summary && (
+        <Text color={COLORS.textMuted}>  ⎿ {summary}</Text>
+      )}
 
-      {/* Diff lines */}
-      {show.map((l, i) => {
-        const ln = l.lineNum ? String(l.lineNum).padStart(3) : '   ';
-        if (l.type === 'remove') {
-          return (
-            <Box key={i}>
-              <Text color="#444">│</Text>
-              <Text color="#444">{ln} </Text>
-              <Text color="#E07070" bold>- </Text>
-              <Text color="#E07070">{l.content}</Text>
-            </Box>
-          );
+      {/* Diff lines - NO Box wrapper, just Text for compactness */}
+      {show.map((line, i) => {
+        const ln = line.lineNum ? String(line.lineNum).padStart(lnWidth) : ' '.repeat(lnWidth);
+        const content = line.content.slice(0, contentWidth);
+
+        if (line.type === 'add') {
+          // Green background, green text - full line
+          const padded = (ln + ' + ' + content).padEnd(width);
+          return <Text key={i} backgroundColor="#1e3a1e" color="#98c379">{padded}</Text>;
         }
-        if (l.type === 'add') {
-          return (
-            <Box key={i}>
-              <Text color="#444">│</Text>
-              <Text color="#444">    </Text>
-              <Text color="#7DC87D" bold>+ </Text>
-              <Text color="#7DC87D">{l.content}</Text>
-            </Box>
-          );
+
+        if (line.type === 'remove') {
+          // Red background, red text - full line
+          const padded = (ln + ' - ' + content).padEnd(width);
+          return <Text key={i} backgroundColor="#3a1e1e" color="#e06c75">{padded}</Text>;
         }
-        return (
-          <Box key={i}>
-            <Text color="#444">│</Text>
-            <Text color="#3A3A3A">{ln}   </Text>
-            <Text color="#666">{l.content}</Text>
-          </Box>
-        );
+
+        // Context line - dim, no background
+        return <Text key={i} color={COLORS.textDim}>{ln}   {content}</Text>;
       })}
 
-      {/* Hidden count */}
-      {hidden > 0 && (
-        <Box>
-          <Text color="#444">│</Text>
-          <Text color="#546E7A">    ... {hidden} more lines</Text>
-        </Box>
-      )}
-
-      {/* Footer */}
-      <Box>
-        <Text color="#444">╰─</Text>
-      </Box>
+      {/* Collapsed indicator */}
+      {hidden > 0 && <Text color={COLORS.textVeryDim}>  … {hidden} more</Text>}
     </Box>
   );
 });
 
-// Streaming text with real-time markdown rendering
-const StreamingText = memo(function StreamingText({ text, isStreaming, skipMetrics }: { text: string; isStreaming: boolean; skipMetrics?: boolean }) {
+// ============================================================================
+// File List Result (Glob)
+// ============================================================================
+
+const FileListResult = memo(function FileListResult({
+  files, width
+}: {
+  files: string[];
+  width: number;
+}) {
+  if (files.length === 0) {
+    return (
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>No files found</Text>
+      </Text>
+    );
+  }
+
+  const show = files.slice(0, 10);
+  const hidden = files.length - show.length;
+
   return (
     <Box flexDirection="column">
-      <Markdown streaming={isStreaming} skipMetrics={skipMetrics}>{text}</Markdown>
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>Found {files.length} files</Text>
+      </Text>
+      {show.map((file, i) => (
+        <Text key={i} color={COLORS.textDim}>
+          {'   '}{truncatePath(file, width - 6)}
+        </Text>
+      ))}
+      {hidden > 0 && (
+        <Text color={COLORS.textVeryDim}>
+          {'   '}… {hidden} more
+        </Text>
+      )}
     </Box>
   );
 });
+
+// ============================================================================
+// Grep Result
+// ============================================================================
+
+const GrepResult = memo(function GrepResult({
+  matches, width
+}: {
+  matches: Array<{ file: string; line?: number; content?: string }>;
+  width: number;
+}) {
+  const show = matches.slice(0, 8);
+  const hidden = matches.length - show.length;
+
+  return (
+    <Box flexDirection="column">
+      <Text>
+        <Text color={COLORS.textDim}> └ </Text>
+        <Text color={COLORS.textMuted}>Found {matches.length} matches</Text>
+      </Text>
+      {show.map((m, i) => (
+        <Text key={i} color={COLORS.textDim}>
+          {'   '}{truncatePath(m.file, width - 6)}{m.line ? `:${m.line}` : ''}
+        </Text>
+      ))}
+      {hidden > 0 && (
+        <Text color={COLORS.textVeryDim}>
+          {'   '}… {hidden} more
+        </Text>
+      )}
+    </Box>
+  );
+});
+
+// ============================================================================
+// Bash Result
+// ============================================================================
+
+const BashResult = memo(function BashResult({
+  output, exitCode, width
+}: {
+  output: string;
+  exitCode?: number;
+  width: number;
+}) {
+  const lines = output.trim().split('\n');
+  const maxLines = 15;
+  const show = lines.slice(0, maxLines);
+  const hidden = lines.length - maxLines;
+  const failed = exitCode !== undefined && exitCode !== 0;
+
+  return (
+    <Box flexDirection="column">
+      {show.map((line, i) => {
+        const displayLine = line.length > width - 4 ? line.slice(0, width - 5) + '…' : line;
+        return (
+          <Text key={i}>
+            <Text color={COLORS.textDim}>{i === 0 ? ' └ ' : '   '}</Text>
+            <Text color={failed ? COLORS.error : COLORS.textMuted}>{displayLine}</Text>
+          </Text>
+        );
+      })}
+      {hidden > 0 && (
+        <Text color={COLORS.textVeryDim}>
+          {'   '}… {hidden} more lines
+        </Text>
+      )}
+    </Box>
+  );
+});
+
+// ============================================================================
+// Formatting Helpers
+// ============================================================================
+
+function formatTool(tool: ToolCall): { header: string; detail?: string } {
+  const name = tool.name?.toLowerCase() || '';
+  const input = tool.input || {};
+
+  switch (name) {
+    case 'read':
+      return { header: 'Read', detail: truncatePath(String(input.file_path || '')) };
+
+    case 'edit':
+      return { header: 'Update', detail: truncatePath(String(input.file_path || '')) };
+
+    case 'write':
+      return { header: 'Write', detail: truncatePath(String(input.file_path || '')) };
+
+    case 'bash': {
+      const cmd = String(input.command || '');
+      const short = cmd.length > 50 ? cmd.slice(0, 47) + '…' : cmd;
+      return { header: 'Bash', detail: short };
+    }
+
+    case 'glob':
+      return { header: 'Glob', detail: String(input.pattern || '') };
+
+    case 'grep':
+      return { header: 'Grep', detail: `/${String(input.pattern || '')}/` };
+
+    case 'ls':
+      return { header: 'List', detail: truncatePath(String(input.path || '.')) };
+
+    case 'todowrite':
+      return { header: 'TodoWrite', detail: `${(input.todos as unknown[])?.length || 0} items` };
+
+    case 'task':
+      return { header: 'Task', detail: String(input.description || '') };
+
+    default:
+      return { header: name.charAt(0).toUpperCase() + name.slice(1) };
+  }
+}
+
+function truncatePath(path: string, max: number = 60): string {
+  if (!path) return '';
+
+  // Replace home directory
+  const home = process.env.HOME || '';
+  let p = path.startsWith(home) ? '~' + path.slice(home.length) : path;
+
+  if (p.length <= max) return p;
+
+  // Show …/parent/file
+  const parts = p.split('/');
+  const file = parts.pop() || '';
+  const parent = parts.pop() || '';
+  return `…/${parent}/${file}`.slice(0, max);
+}

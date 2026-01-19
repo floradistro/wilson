@@ -350,6 +350,223 @@ export const EnvSchema: ToolSchema = {
   },
 };
 
+// =============================================================================
+// Xcode & iOS Development Schemas
+// =============================================================================
+
+export const XcodeBuildSchema: ToolSchema = {
+  name: 'XcodeBuild',
+  description: 'Build Xcode projects and workspaces. Handles xcodebuild commands with proper configuration.',
+  parameters: {
+    type: 'object',
+    properties: {
+      path: { type: 'string', description: 'Path to .xcodeproj or .xcworkspace file' },
+      scheme: { type: 'string', description: 'Scheme to build (auto-detected if not specified)' },
+      configuration: { type: 'string', description: 'Build configuration: Debug or Release (default: Debug)' },
+      destination: { type: 'string', description: 'Build destination (e.g., "platform=iOS Simulator,name=iPhone 15")' },
+      action: { type: 'string', description: 'Build action: build, test, clean, archive, analyze (default: build)' },
+      derived_data_path: { type: 'string', description: 'Custom DerivedData path' },
+      quiet: { type: 'boolean', description: 'Reduce output verbosity' },
+    },
+    required: ['path'],
+  },
+};
+
+export const SimctlSchema: ToolSchema = {
+  name: 'Simctl',
+  description: 'Control iOS Simulators - list, boot, shutdown, install apps, take screenshots.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: list, boot, shutdown, erase, install, uninstall, launch, screenshot, openurl, status_bar' },
+      device: { type: 'string', description: 'Device UDID or name (e.g., "iPhone 15 Pro")' },
+      app_path: { type: 'string', description: 'Path to .app bundle (for install action)' },
+      bundle_id: { type: 'string', description: 'App bundle ID (for launch/uninstall)' },
+      url: { type: 'string', description: 'URL to open (for openurl action)' },
+      output_path: { type: 'string', description: 'Output path for screenshot' },
+    },
+    required: ['action'],
+  },
+};
+
+export const XcrunSchema: ToolSchema = {
+  name: 'Xcrun',
+  description: 'Run Xcode developer tools - swift, swiftc, clang, instruments, notarytool, etc.',
+  parameters: {
+    type: 'object',
+    properties: {
+      tool: { type: 'string', description: 'Tool to run (swift, swiftc, clang, instruments, notarytool, etc.)' },
+      args: { type: 'array', description: 'Arguments to pass to the tool' },
+      sdk: { type: 'string', description: 'SDK to use: iphoneos, iphonesimulator, macosx' },
+    },
+    required: ['tool'],
+  },
+};
+
+export const SwiftPackageSchema: ToolSchema = {
+  name: 'SwiftPackage',
+  description: 'Manage Swift packages - build, test, update dependencies.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: build, test, clean, update, resolve, show-dependencies, generate-xcodeproj' },
+      path: { type: 'string', description: 'Path to package directory (default: cwd)' },
+      configuration: { type: 'string', description: 'Build configuration: debug or release' },
+      product: { type: 'string', description: 'Specific product to build' },
+    },
+    required: ['action'],
+  },
+};
+
+export const XcodeSelectSchema: ToolSchema = {
+  name: 'XcodeSelect',
+  description: 'Check and manage Xcode installation and developer directory.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: print-path, version, switch, install' },
+      path: { type: 'string', description: 'Path to Xcode (for switch action)' },
+    },
+    required: ['action'],
+  },
+};
+
+// =============================================================================
+// Project Management Schemas
+// =============================================================================
+
+export const NpmSchema: ToolSchema = {
+  name: 'Npm',
+  description: 'Run npm commands - install, build, test, run scripts.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: install, build, test, run, audit, outdated, update' },
+      script: { type: 'string', description: 'Script name (for run action)' },
+      packages: { type: 'array', description: 'Packages to install' },
+      path: { type: 'string', description: 'Project directory (default: cwd)' },
+      dev: { type: 'boolean', description: 'Install as dev dependency' },
+    },
+    required: ['action'],
+  },
+};
+
+export const GitSchema: ToolSchema = {
+  name: 'Git',
+  description: 'Git operations - status, diff, log, branch, checkout, commit, push, pull.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: status, diff, log, branch, checkout, add, commit, push, pull, stash, fetch' },
+      path: { type: 'string', description: 'Repository directory (default: cwd)' },
+      branch: { type: 'string', description: 'Branch name (for checkout/branch actions)' },
+      message: { type: 'string', description: 'Commit message (for commit action)' },
+      files: { type: 'array', description: 'Files to add/commit' },
+      count: { type: 'number', description: 'Number of commits for log (default: 10)' },
+    },
+    required: ['action'],
+  },
+};
+
+export const BunSchema: ToolSchema = {
+  name: 'Bun',
+  description: 'Run bun commands - install, build, test, run scripts.',
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: install, build, test, run, add, remove, update' },
+      script: { type: 'string', description: 'Script name (for run action)' },
+      packages: { type: 'array', description: 'Packages to add/remove' },
+      path: { type: 'string', description: 'Project directory (default: cwd)' },
+      dev: { type: 'boolean', description: 'Install as dev dependency' },
+    },
+    required: ['action'],
+  },
+};
+
+export const DevServerSchema: ToolSchema = {
+  name: 'DevServer',
+  description: `Intelligent dev server management with system-wide discovery.
+
+ACTIONS:
+- list: List ALL running dev servers (managed + system-wide discovery)
+- discover: Detailed discovery of all dev servers with CPU/memory
+- ports: Show all ports in use (highlights dev ports 3000, 5173, etc.)
+- start: Start dev server (auto-detects framework)
+- stop: Stop a managed dev server
+- restart: Restart dev server (preserves port)
+- kill: Kill any process by PID
+- logs: Get server output (managed servers only)
+- status: Check if server is running
+- check-change: Check if file change needs restart vs hot-reload
+- detect: Detect framework and recommended commands
+
+SYSTEM-WIDE VISIBILITY:
+- Discovers ALL node/bun/vite/next processes running
+- Shows working directory, port, CPU%, memory%
+- Works for servers started by Bash, manually, or other tools
+
+HOT RELOAD vs RESTART:
+- Component changes → Hot reload (automatic)
+- Config changes (next.config.js, vite.config.ts) → Restart needed
+- package.json, .env changes → Restart needed`,
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: list, discover, ports, start, stop, restart, kill, logs, status, check-change, detect' },
+      path: { type: 'string', description: 'Project directory (default: cwd)' },
+      id: { type: 'string', description: 'Server ID (for stop/restart/logs)' },
+      pid: { type: 'number', description: 'Process ID (for kill action)' },
+      command: { type: 'string', description: 'Custom start command (default: auto-detected)' },
+      port: { type: 'number', description: 'Port to use (default: framework default)' },
+      file: { type: 'string', description: 'File path (for check-change action)' },
+    },
+    required: ['action'],
+  },
+};
+
+export const DebugSchema: ToolSchema = {
+  name: 'Debug',
+  description: `Self-feedback loop for error detection and debugging.
+
+ACTIONS:
+- analyze: Parse error output, extract errors, suggest fixes
+- run-check: Run a command and analyze its output for errors
+- read-log: Read and parse log files for errors/warnings
+- find-logs: Find log files in a project
+- stack-trace: Parse a stack trace to identify error location
+- health: Check project health (deps, config, common issues)
+
+SELF-CORRECTION PATTERN:
+1. Run command (build/test) with run-check
+2. If errors, analyze output
+3. Get suggestions for fixes
+4. Apply fixes
+5. Re-run to verify
+
+ERROR TYPES DETECTED:
+- TypeScript errors (TS2345, etc.)
+- ESLint errors and warnings
+- Import/module not found errors
+- Syntax errors
+- Build failures
+- Test failures
+- Permission errors
+- Network errors`,
+  parameters: {
+    type: 'object',
+    properties: {
+      action: { type: 'string', description: 'Action: analyze, run-check, read-log, find-logs, stack-trace, health' },
+      output: { type: 'string', description: 'Error output to analyze (for analyze, stack-trace)' },
+      path: { type: 'string', description: 'File or project path' },
+      command: { type: 'string', description: 'Command to run (for run-check)' },
+      lines: { type: 'number', description: 'Number of log lines to read (default: 100)' },
+      level: { type: 'string', description: 'Filter logs by level: error, warn, info, debug' },
+    },
+    required: ['action'],
+  },
+};
+
 // All schemas for export
 export const ALL_SCHEMAS: ToolSchema[] = [
   ReadSchema,
@@ -367,4 +584,18 @@ export const ALL_SCHEMAS: ToolSchema[] = [
   EnvSchema,
   TodoWriteSchema,
   AskUserSchema,
+  // Xcode tools
+  XcodeBuildSchema,
+  SimctlSchema,
+  XcrunSchema,
+  SwiftPackageSchema,
+  XcodeSelectSchema,
+  // Project management tools
+  NpmSchema,
+  GitSchema,
+  BunSchema,
+  // Dev server management
+  DevServerSchema,
+  // Debug & feedback
+  DebugSchema,
 ];

@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import type { Tool, ToolResult } from '../types.js';
 import { ReadSchema } from './schemas.js';
+import { recordFileRead } from './core/hooks.js';
 
 interface ReadParams {
   file_path: string;
@@ -34,6 +35,10 @@ export const readTool: Tool = {
 
     try {
       const content = readFileSync(file_path, 'utf8');
+
+      // Record file read for hooks system (read-before-write enforcement)
+      recordFileRead(file_path, content);
+
       const lines = content.split('\n');
       const startLine = Math.max(1, offset);
       const endLine = Math.min(lines.length, startLine - 1 + Math.min(2000, limit));
@@ -46,6 +51,8 @@ export const readTool: Tool = {
       return {
         success: true,
         content: numbered,
+        totalLines: lines.length,
+        cachedForEdit: true,
       };
     } catch (error) {
       return {

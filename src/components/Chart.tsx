@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 
 interface ChartData {
   label: string;
@@ -29,16 +29,20 @@ function sparkline(vals: number[]): string {
 }
 
 export function BarChart({ title, data, isCurrency = false }: BarChartProps) {
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns || 80;
+
   if (!data || data.length === 0) return null;
 
   const max = Math.max(...data.map((d) => d.value));
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const labelWidth = Math.min(Math.max(...data.map((d) => d.label.length), 8), 18);
+  const dividerWidth = Math.max(20, Math.min(termWidth - 10, 55));
 
   return (
     <Box flexDirection="column" marginY={1}>
       <Text bold color="white">{title}</Text>
-      <Text dimColor>{'─'.repeat(55)}</Text>
+      <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
 
       {data.slice(0, 8).map((item, i) => {
         const barWidth = Math.round((item.value / max) * 24);
@@ -58,7 +62,7 @@ export function BarChart({ title, data, isCurrency = false }: BarChartProps) {
         );
       })}
 
-      <Text dimColor>{'─'.repeat(55)}</Text>
+      <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
       <Box>
         <Text bold>{'Total'.padEnd(labelWidth)}</Text>
         <Text>  </Text>

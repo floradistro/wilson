@@ -1,6 +1,7 @@
 import { Component, ReactNode } from 'react';
 import { Box, Text } from 'ink';
 import { log } from '../utils/logger.js';
+import { COLORS } from '../theme/colors.js';
 
 interface Props {
   children: ReactNode;
@@ -38,10 +39,10 @@ export class ErrorBoundary extends Component<Props, State> {
 
       return (
         <Box flexDirection="column" padding={1}>
-          <Text color="red" bold>Something went wrong</Text>
-          <Text color="gray">{this.state.error?.message || 'Unknown error'}</Text>
+          <Text color={COLORS.error} bold>✗ Something went wrong</Text>
+          <Text color={COLORS.textMuted}>{this.state.error?.message || 'Unknown error'}</Text>
           <Box marginTop={1}>
-            <Text color="gray" dimColor>Press Ctrl+C to exit and try again</Text>
+            <Text color={COLORS.textDim}>Press Ctrl+C to exit and try again</Text>
           </Box>
         </Box>
       );

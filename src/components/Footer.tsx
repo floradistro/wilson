@@ -1,102 +1,94 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
 import type { UsageStats } from '../types.js';
-import { CommandMenu, filterCommands, COMMANDS } from './CommandMenu.js';
+import { CommandMenu, filterCommands } from './CommandMenu.js';
+import { COLORS } from '../theme/colors.js';
+import { KNIGHT_RIDER_FRAMES, KNIGHT_RIDER_INTERVAL } from '../theme/ui.js';
 
 const MAX_CTX = 200000;
 
-// Single pixel pulse animation
-const PixelPulse = memo(function PixelPulse() {
+// Knight Rider style streaming indicator
+const StreamingIndicator = memo(function StreamingIndicator({
+  streamingChars, startTime
+}: { streamingChars: number; startTime: number }) {
   const [frame, setFrame] = useState(0);
-  const frames = ['·', '•', '✦', '❋', '✦', '•'];
-
-  useEffect(() => {
-    const id = setInterval(() => setFrame(f => (f + 1) % frames.length), 150);
-    return () => clearInterval(id);
-  }, []);
-
-  return <Text color="#7DC87D">{frames[frame]} </Text>;
-});
-
-// Mini Knight Rider animation for the input line
-const KnightRider = memo(function KnightRider({ width = 12 }: { width?: number }) {
-  const [pos, setPos] = useState(0);
-  const dirRef = useRef(1);
+  const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
     const id = setInterval(() => {
-      setPos(p => {
-        const next = p + dirRef.current;
-        if (next >= width - 1) {
-          dirRef.current = -1;
-          return width - 1;
-        }
-        if (next <= 0) {
-          dirRef.current = 1;
-          return 0;
-        }
-        return next;
-      });
-    }, 60);
+      setFrame(f => (f + 1) % KNIGHT_RIDER_FRAMES.length);
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
+    }, KNIGHT_RIDER_INTERVAL);
     return () => clearInterval(id);
-  }, [width]);
+  }, [startTime]);
 
-  const bar = Array(width).fill(0).map((_, i) => {
-    const dist = Math.abs(i - pos);
-    if (dist === 0) return '█';
-    if (dist === 1) return '▓';
-    if (dist === 2) return '▒';
-    return '░';
-  }).join('');
+  // Estimate tokens (~4 chars per token)
+  const estTokens = Math.ceil(streamingChars / 4);
+  const tokensStr = estTokens >= 1000 ? `${(estTokens / 1000).toFixed(1)}k` : String(estTokens);
 
-  return <Text color="#7DC87D">{bar}</Text>;
+  // Format time
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+
+  // Render Knight Rider with color gradient
+  const currentFrame = KNIGHT_RIDER_FRAMES[frame];
+
+  return (
+    <Box>
+      <Text>
+        {currentFrame.split('').map((char, i) => (
+          <Text key={i} color={char === '●' ? COLORS.primary : COLORS.textDisabled}>{char}</Text>
+        ))}
+      </Text>
+      <Text color={COLORS.textMuted}> Generating</Text>
+      <Text color={COLORS.textVeryDim}> · </Text>
+      <Text color={COLORS.textDim}>{tokensStr} tokens</Text>
+      <Text color={COLORS.textVeryDim}> · </Text>
+      <Text color={COLORS.textDim}>{timeStr}</Text>
+    </Box>
+  );
 });
 
-// Separate stats line to isolate dots animation
-const StatsLine = memo(function StatsLine({
-  isStreaming, streamingChars, usage, toolCallCount, contextTokens
+// Idle stats - minimal single line
+const IdleStats = memo(function IdleStats({
+  usage, toolCallCount, contextTokens
 }: {
-  isStreaming: boolean;
-  streamingChars: number;
   usage: UsageStats;
   toolCallCount: number;
   contextTokens: number;
 }) {
-  const [dots, setDots] = useState(0);
+  const hasActivity = usage.inputTokens > 0 || toolCallCount > 0;
 
-  useEffect(() => {
-    if (!isStreaming) { setDots(0); return; }
-    const id = setInterval(() => setDots(d => (d + 1) % 4), 400);
-    return () => clearInterval(id);
-  }, [isStreaming]);
-
-  const fmt = (n: number) => n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
-  const pct = Math.round((contextTokens / MAX_CTX) * 100);
-  const hasStats = usage.inputTokens > 0 || toolCallCount > 0;
-  const estTokens = Math.ceil(streamingChars / 4);
-
-  if (isStreaming) {
-    // Fixed-width dots animation - dim remaining dots instead of hiding them
+  if (!hasActivity) {
     return (
       <Box>
-        <PixelPulse />
-        <Text color="#7DC87D">generating</Text>
-        <Text color="#7DC87D">{'.'.repeat(dots)}</Text>
-        <Text color="#333">{'.'.repeat(3 - dots)}</Text>
-        <Text color="#888">{streamingChars > 0 ? ` ${fmt(streamingChars)} chars (~${fmt(estTokens)} tokens)` : ''}</Text>
+        <Text color={COLORS.textVeryDim}>Ready</Text>
       </Box>
     );
   }
 
-  if (hasStats) {
-    return (
-      <Text color="#555">
-        ctx:{pct}% tools:{toolCallCount} ↑{fmt(usage.inputTokens)} ↓{fmt(usage.outputTokens)}
-      </Text>
-    );
-  }
+  const pct = Math.round((contextTokens / MAX_CTX) * 100);
+  const ctxColor = pct > 90 ? COLORS.error : pct > 75 ? COLORS.warning : COLORS.textDim;
+  const total = usage.inputTokens + usage.outputTokens;
+  const totalStr = total >= 1000 ? `${(total / 1000).toFixed(1)}k` : String(total);
 
-  return <Text color="#333">ready</Text>;
+  return (
+    <Box>
+      <Text color={ctxColor}>{pct}%</Text>
+      <Text color={COLORS.textVeryDim}> ctx</Text>
+      <Text color={COLORS.textDisabled}> · </Text>
+      <Text color={COLORS.textDim}>{totalStr}</Text>
+      <Text color={COLORS.textVeryDim}> tokens</Text>
+      {toolCallCount > 0 && (
+        <>
+          <Text color={COLORS.textDisabled}> · </Text>
+          <Text color={COLORS.textDim}>{toolCallCount}</Text>
+          <Text color={COLORS.textVeryDim}> tools</Text>
+        </>
+      )}
+    </Box>
+  );
 });
 
 interface FooterProps {
@@ -117,15 +109,21 @@ export const Footer = memo(function Footer({
   disabled = false, usage, toolCallCount, contextTokens, streamingChars, isStreaming,
 }: FooterProps) {
   const { stdout } = useStdout();
-  const width = (stdout?.columns || 80) - 1;
+  const width = Math.max(40, (stdout?.columns || 80) - 1);
   const [menuIndex, setMenuIndex] = useState(0);
+  const streamStartRef = useRef(Date.now());
 
-  // Check if we should show command menu
+  // Track streaming start time
+  useEffect(() => {
+    if (isStreaming) {
+      streamStartRef.current = Date.now();
+    }
+  }, [isStreaming]);
+
   const showMenu = inputValue.startsWith('/') && !disabled;
   const query = showMenu ? inputValue.slice(1) : '';
   const filteredCommands = showMenu ? filterCommands(query) : [];
 
-  // Reset menu index when query changes
   useEffect(() => {
     setMenuIndex(0);
   }, [query]);
@@ -143,7 +141,6 @@ export const Footer = memo(function Footer({
   }) => {
     if (disabled) return;
 
-    // Handle command menu navigation
     if (showMenu && filteredCommands.length > 0) {
       if (key.upArrow) {
         setMenuIndex(i => i > 0 ? i - 1 : filteredCommands.length - 1);
@@ -154,73 +151,81 @@ export const Footer = memo(function Footer({
         return;
       }
       if (key.tab) {
-        // Complete with selected command
         const cmd = filteredCommands[menuIndex];
-        if (cmd) {
-          onInputChange('/' + cmd.name);
-        }
+        if (cmd) onInputChange('/' + cmd.name);
         return;
       }
       if (key.return) {
-        // Submit the selected command
         const cmd = filteredCommands[menuIndex];
-        if (cmd) {
-          onSubmit('/' + cmd.name);
-        }
+        if (cmd) onSubmit('/' + cmd.name);
         return;
       }
       if (key.escape) {
-        // Clear input to dismiss menu
         onInputChange('');
         return;
       }
     }
 
-    // Normal input handling
     if (key.return) { onSubmit(inputValue); return; }
     if (key.backspace || key.delete) { onInputChange(inputValue.slice(0, -1)); return; }
     if (key.ctrl || key.meta || key.escape) return;
     if (input) onInputChange(inputValue + input);
   }, [disabled, inputValue, onInputChange, onSubmit, showMenu, filteredCommands, menuIndex]));
 
+  // Responsive input handling
+  const promptWidth = 3;
+  const availableWidth = Math.max(20, width - promptWidth - 5);
+  const inputLen = inputValue.length;
+
+  const displayValue = inputLen > availableWidth
+    ? '…' + inputValue.slice(-(availableWidth - 1))
+    : inputValue;
+
   return (
     <Box flexDirection="column">
-      {/* Stats line - above the divider */}
-      <Box paddingX={1}>
-        <StatsLine
-          isStreaming={isStreaming}
-          streamingChars={streamingChars}
-          usage={usage}
-          toolCallCount={toolCallCount}
-          contextTokens={contextTokens}
+      {/* Command menu - above divider */}
+      {showMenu && (
+        <CommandMenu
+          query={query}
+          selectedIndex={menuIndex}
+          visible={showMenu}
         />
+      )}
+
+      {/* Thin divider */}
+      <Text color={COLORS.textDisabled}>{'─'.repeat(width)}</Text>
+
+      {/* Status line - minimal, Claude Code style */}
+      <Box paddingX={1} justifyContent="space-between">
+        <Box>
+          {isStreaming ? (
+            <StreamingIndicator
+              streamingChars={streamingChars}
+              startTime={streamStartRef.current}
+            />
+          ) : (
+            <IdleStats
+              usage={usage}
+              toolCallCount={toolCallCount}
+              contextTokens={contextTokens}
+            />
+          )}
+        </Box>
+        {/* Right side - just show char count when typing long input */}
+        {inputLen > 200 && !isStreaming && (
+          <Text color={inputLen > 500 ? COLORS.warning : COLORS.textVeryDim}>{inputLen}</Text>
+        )}
       </Box>
 
-      {/* Command menu - above divider */}
-      <CommandMenu
-        query={query}
-        selectedIndex={menuIndex}
-        visible={showMenu}
-      />
-
-      {/* Divider line */}
-      <Text color="#333">{'─'.repeat(width)}</Text>
-
-      {/* Input prompt with Knight Rider animation when streaming */}
+      {/* Input area */}
       <Box paddingX={1}>
-        <Text color={disabled ? '#333' : '#555'}>❯ </Text>
+        <Text color={disabled ? COLORS.textDisabled : COLORS.primary}>› </Text>
         {inputValue ? (
-          <Text color={disabled ? '#444' : '#E0E0E0'}>{inputValue}</Text>
+          <Text color={disabled ? COLORS.textVeryDim : COLORS.text}>{displayValue}</Text>
         ) : (
-          <Text color={disabled ? '#333' : '#444'}>{placeholder}</Text>
+          <Text color={COLORS.textVeryDim}>{placeholder}</Text>
         )}
-        <Text color={disabled ? '#333' : '#7DC87D'}>▋</Text>
-        {isStreaming && (
-          <>
-            <Text> </Text>
-            <KnightRider width={16} />
-          </>
-        )}
+        {!disabled && <Text color={COLORS.primary}>│</Text>}
       </Box>
     </Box>
   );

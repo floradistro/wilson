@@ -198,8 +198,8 @@ function normalize(raw: Record<string, unknown>): StreamEvent | null {
     };
   }
 
-  // Usage stats
-  if (type === 'usage') {
+  // Usage stats - handle both direct usage events and message_delta with usage
+  if (type === 'usage' || type === 'message_delta') {
     const usage = raw.usage as Record<string, unknown> | undefined;
     if (usage) {
       return {
@@ -210,6 +210,8 @@ function normalize(raw: Record<string, unknown>): StreamEvent | null {
         },
       };
     }
+    // message_delta without usage, skip
+    if (type === 'message_delta') return null;
     return null;
   }
 
@@ -227,7 +229,7 @@ function normalize(raw: Record<string, unknown>): StreamEvent | null {
   }
 
   // Skip known non-content events
-  if (['message_start', 'content_block_stop', 'message_delta', 'ping', 'input_json_delta'].includes(type)) {
+  if (['message_start', 'content_block_stop', 'ping', 'input_json_delta'].includes(type)) {
     return null;
   }
 

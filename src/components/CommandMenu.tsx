@@ -1,6 +1,8 @@
 import { memo } from 'react';
 import { Box, Text } from 'ink';
 import { getSlashCommands } from '../services/menu.js';
+import { SLASH_COMMANDS, type CommandDef } from '../help/commands.js';
+import { COLORS } from '../theme/colors.js';
 
 export interface Command {
   name: string;
@@ -8,20 +10,16 @@ export interface Command {
   description: string;
 }
 
-// Fallback commands (used before menu is fetched)
-const FALLBACK_COMMANDS: Command[] = [
-  { name: 'new', aliases: ['clear'], description: 'Start fresh conversation' },
-  { name: 'stores', aliases: ['store'], description: 'Switch store' },
-  { name: 'location', aliases: ['loc', 'locations'], description: 'Switch location' },
-  { name: 'refresh', aliases: ['sync'], description: 'Sync stores from server' },
-  { name: 'context', aliases: ['ctx'], description: 'Show context window usage' },
-  { name: 'tokens', aliases: [], description: 'Show token usage and cost' },
-  { name: 'status', aliases: [], description: 'View connection status' },
-  { name: 'help', aliases: ['?'], description: 'Show help' },
-  { name: 'logout', aliases: ['quit', 'exit'], description: 'Sign out' },
-];
+// Convert CommandDef to Command for compatibility
+function toCommand(cmd: CommandDef): Command {
+  return {
+    name: cmd.name,
+    aliases: cmd.aliases,
+    description: cmd.description,
+  };
+}
 
-// Get commands from backend menu service, with fallback
+// Get commands from backend menu service, with fallback to centralized commands
 export function getCommands(): Command[] {
   try {
     const backendCommands = getSlashCommands();
@@ -31,11 +29,11 @@ export function getCommands(): Command[] {
   } catch {
     // Fallback to static commands
   }
-  return FALLBACK_COMMANDS;
+  return SLASH_COMMANDS.map(toCommand);
 }
 
 // Legacy export for compatibility
-export const COMMANDS = FALLBACK_COMMANDS;
+export const COMMANDS = SLASH_COMMANDS.map(toCommand);
 
 export function filterCommands(query: string): Command[] {
   const commands = getCommands();
@@ -66,7 +64,7 @@ export const CommandMenu = memo(function CommandMenu({
   if (filtered.length === 0) {
     return (
       <Box paddingX={1} marginBottom={0}>
-        <Text color="#555">No commands match "/{query}"</Text>
+        <Text color={COLORS.textDim}>No commands match "/{query}"</Text>
       </Box>
     );
   }
@@ -74,25 +72,25 @@ export const CommandMenu = memo(function CommandMenu({
   return (
     <Box flexDirection="column" paddingX={1} marginBottom={0}>
       <Box marginBottom={0}>
-        <Text color="#666">Commands</Text>
-        <Text color="#444"> (↑↓ navigate, Tab complete, Enter select, Esc cancel)</Text>
+        <Text color={COLORS.textMuted}>Commands</Text>
+        <Text color={COLORS.textVeryDim}> (↑↓ navigate, Tab complete, Enter select, Esc cancel)</Text>
       </Box>
       <Box flexDirection="column">
         {filtered.slice(0, 8).map((cmd, i) => {
           const isSelected = i === selectedIndex;
           return (
             <Box key={cmd.name}>
-              <Text color={isSelected ? '#7DC87D' : '#555'}>
+              <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
                 {isSelected ? '▸' : ' '}
               </Text>
-              <Text color={isSelected ? '#7DC87D' : '#888'} bold={isSelected}>
+              <Text color={isSelected ? COLORS.primary : COLORS.textMuted} bold={isSelected}>
                 {' /'}
                 {cmd.name}
               </Text>
               {cmd.aliases.length > 0 && (
-                <Text color="#444"> ({cmd.aliases.join(', ')})</Text>
+                <Text color={COLORS.textVeryDim}> ({cmd.aliases.join(', ')})</Text>
               )}
-              <Text color="#555"> - {cmd.description}</Text>
+              <Text color={COLORS.textDim}> - {cmd.description}</Text>
             </Box>
           );
         })}

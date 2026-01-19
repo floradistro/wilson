@@ -34,3 +34,10 @@ export { default as ErrorBoundary } from './ErrorBoundary.js';
 // Charts
 export { default as BarChart } from './charts/BarChart.js';
 export { default as Table } from './charts/Table.js';
+
+// Enhanced components - Apple-level polish
+export { EnhancedInput } from './EnhancedInput.js';
+export { EnhancedStatusBar } from './EnhancedStatusBar.js';
+export { EnhancedSpinner, LoadingState } from './EnhancedSpinner.js';
+export { ContextualHelp, SmartTips } from './ContextualHelp.js';
+export { EnhancedErrorBoundary } from './EnhancedErrorBoundary.js';

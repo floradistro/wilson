@@ -1,4 +1,4 @@
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { formatNumber } from '../../utils/format.js';
 
 interface DataPoint {
@@ -26,6 +26,9 @@ export function DonutChart({
   isCurrency = false,
   maxSlices = 5,
 }: DonutChartProps) {
+  const { stdout } = useStdout();
+  const termWidth = stdout?.columns || 80;
+
   if (!data || data.length === 0) {
     return <Text dimColor>No data</Text>;
   }
@@ -33,13 +36,14 @@ export function DonutChart({
   const total = data.reduce((sum, d) => sum + d.value, 0);
   const labelWidth = Math.min(Math.max(...data.map((d) => d.label.length), 12), 16);
   const displayData = data.slice(0, maxSlices);
+  const dividerWidth = Math.max(20, Math.min(termWidth - 10, 50));
 
   return (
     <Box flexDirection="column">
       {title && (
         <>
           <Text bold color="white">{title}</Text>
-          <Text dimColor>{'─'.repeat(50)}</Text>
+          <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
         </>
       )}
 
@@ -68,7 +72,7 @@ export function DonutChart({
         <Text dimColor>  +{data.length - maxSlices} more</Text>
       )}
 
-      <Text dimColor>{'─'.repeat(50)}</Text>
+      <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
 
       {/* Total row */}
       <Box>

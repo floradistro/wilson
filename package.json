@@ -1,6 +1,6 @@
 {
   "name": "wilson",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "type": "module",
   "bin": {
     "wilson": "./dist/index.js"
@@ -8,9 +8,15 @@
   "scripts": {
     "dev": "bun run src/index.tsx",
     "start": "bun run src/index.tsx",
+    "start:enhanced": "bun run src/AppEnhanced.tsx",
     "build": "bun build src/index.tsx --outdir dist --target node --minify --external @supabase/supabase-js",
+    "build:enhanced": "node scripts/build-enhanced.js",
     "typecheck": "tsc --noEmit",
-    "link": "bun link"
+    "test": "echo \"Tests coming soon...\"",
+    "lint": "echo \"Linting coming soon...\"",
+    "link": "bun link",
+    "clean": "rm -rf dist",
+    "version": "echo $npm_package_version"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",

@@ -47,12 +47,12 @@ export const writeTool: Tool = {
       const diff: DiffLine[] = [];
 
       if (isNew) {
-        // New file - all lines are additions
-        newLines.slice(0, 15).forEach((line) => {
-          diff.push({ type: 'add', content: line });
+        // New file - all lines are additions with line numbers
+        newLines.slice(0, 15).forEach((line, i) => {
+          diff.push({ type: 'add', content: line, lineNum: i + 1 });
         });
         if (newLines.length > 15) {
-          diff.push({ type: 'context', content: `... ${newLines.length - 15} more lines` });
+          diff.push({ type: 'context', content: `… ${newLines.length - 15} more lines` });
         }
       } else {
         // Show removed lines (first few)
@@ -62,12 +62,12 @@ export const writeTool: Tool = {
         if (oldLines.length > 5) {
           diff.push({ type: 'context', content: `... ${oldLines.length - 5} more removed` });
         }
-        // Show added lines (first few)
-        newLines.slice(0, 10).forEach((line) => {
-          diff.push({ type: 'add', content: line });
+        // Show added lines (first few) with line numbers
+        newLines.slice(0, 10).forEach((line, i) => {
+          diff.push({ type: 'add', content: line, lineNum: i + 1 });
         });
         if (newLines.length > 10) {
-          diff.push({ type: 'context', content: `... ${newLines.length - 10} more added` });
+          diff.push({ type: 'context', content: `… ${newLines.length - 10} more` });
         }
       }
 

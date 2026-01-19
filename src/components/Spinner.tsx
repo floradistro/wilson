@@ -1,8 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
 import { Box, Text } from 'ink';
+import { COLORS } from '../theme/colors.js';
 
-const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-const INTERVAL = 80;
+// Knight Rider style animation - bouncing dot
+const KNIGHT_RIDER_FRAMES = ['●∘∘∘∘', '∘●∘∘∘', '∘∘●∘∘', '∘∘∘●∘', '∘∘∘∘●', '∘∘∘●∘', '∘∘●∘∘', '∘●∘∘∘'];
+const INTERVAL = 120;
 
 interface SpinnerProps {
   label?: string;
@@ -16,7 +18,7 @@ export function Spinner({ label, showElapsed = false }: SpinnerProps) {
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setFrame((prev) => (prev + 1) % FRAMES.length);
+      setFrame((prev) => (prev + 1) % KNIGHT_RIDER_FRAMES.length);
       if (showElapsed) {
         setElapsed((Date.now() - startTime.current) / 1000);
       }
@@ -25,11 +27,18 @@ export function Spinner({ label, showElapsed = false }: SpinnerProps) {
     return () => clearInterval(timer);
   }, [showElapsed]);
 
+  // Render knight rider with color gradient
+  const currentFrame = KNIGHT_RIDER_FRAMES[frame];
+
   return (
     <Box>
-      <Text color="green">{FRAMES[frame]}</Text>
-      {label && <Text dimColor> {label}</Text>}
-      {showElapsed && <Text dimColor> {elapsed.toFixed(1)}s</Text>}
+      <Text>
+        {currentFrame.split('').map((char, i) => (
+          <Text key={i} color={char === '●' ? COLORS.primary : COLORS.textDisabled}>{char}</Text>
+        ))}
+      </Text>
+      {label && <Text color={COLORS.textMuted}> {label}</Text>}
+      {showElapsed && <Text color={COLORS.textDim}> {elapsed.toFixed(1)}s</Text>}
     </Box>
   );
 }
