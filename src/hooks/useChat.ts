@@ -159,37 +159,22 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Use session-level tool history (persists across iterations)
-    // sessionToolHistory contains "toolName:paramHash" strings to detect same calls
-    const recentCalls = sessionToolHistory.slice(-15);
+    // LOOP DETECTION: Only detect TRUE loops - identical calls repeated consecutively
+    // A loop is when the AI does the EXACT same thing 3+ times in a row
+    // This allows unlimited different calls (analytics with different query_types, etc.)
 
-    // Check for exact duplicate calls (same tool + same params) - 3 identical = loop
-    if (recentCalls.length >= 3) {
-      const last3 = recentCalls.slice(-3);
+    if (sessionToolHistory.length >= 3) {
+      const last3 = sessionToolHistory.slice(-3);
+      // All 3 must be IDENTICAL (same tool + same params hash)
       if (last3[0] === last3[1] && last3[1] === last3[2]) {
         const toolName = last3[0].split(':')[0];
-        setError(`Loop detected: ${toolName} called 3 times with same parameters. Use /clear to reset.`);
+        setError(`Loop detected: ${toolName} repeated 3 times. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
         return;
       }
     }
 
-    // Check for excessive calls to same tool (even with different params) - 8+ = likely loop
-    const toolNameCounts = recentCalls.reduce((acc, call) => {
-      const name = call.split(':')[0];
-      acc[name] = (acc[name] || 0) + 1;
-      return acc;
-    }, {} as Record<string, number>);
-
-    const maxToolCalls = Math.max(...Object.values(toolNameCounts), 0);
-    if (maxToolCalls >= 8) {
-      const problematicTool = Object.entries(toolNameCounts).find(([_, count]) => count >= 8)?.[0];
-      setError(`Loop detected: ${problematicTool} called ${maxToolCalls} times. Use /clear to reset.`);
-      updateLastMessage({ isStreaming: false });
-      return;
-    }
-
-    // Safety limit - reduced from 500 to 50 for faster loop detection
+    // Safety limit - high ceiling, only catches runaway agents
     if (depth > 50) {
       setError('Maximum tool iterations reached (50). Use /clear to reset.');
       updateLastMessage({ isStreaming: false });
