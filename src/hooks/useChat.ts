@@ -336,13 +336,12 @@ export function useChat() {
         toolsToExecute.push(tool);
       }
 
-      // If ALL tools were blocked, stop the loop
+      // If ALL tools were blocked, stop the loop gracefully (no error shown)
       if (toolsToExecute.length === 0) {
-        log.warn('Loop prevention: all requested tools were duplicates, stopping loop');
+        log.info('Loop prevention: duplicate tools blocked, completing gracefully');
+        // Just finalize the message without any error - the task is done
         updateLastMessage({
-          content: iterationText + (blockedTools.length > 0
-            ? `\n\n[Loop prevented: ${blockedTools.join(', ')}]`
-            : ''),
+          content: iterationText || 'Done.',
           toolCalls: accumulatedTools,
           isStreaming: false,
         });
