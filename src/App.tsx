@@ -23,6 +23,7 @@ import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
 import { categorizeError, getStatusDuration } from './utils/errors.js';
 import { clearSettingsCache } from './lib/config-loader.js';
+import { updater } from './services/updater.js';
 import type { Flags, PendingQuestion, PendingPermission } from './types.js';
 
 interface AppProps {
@@ -319,6 +320,37 @@ export function App({ initialQuery, flags, command }: AppProps) {
       case '/model':
       case '/provider':
         setShowAIChooser(true);
+        return true;
+
+      case '/update':
+        showStatus('Checking for updates...', 'info');
+        updater.checkForUpdates().then(release => {
+          if (release) {
+            showStatus(`Updating to v${release.version}...`, 'info');
+            updater.performUpdate(release).then(() => {
+              showStatus(`Updated to v${release.version} - restart Wilson`, 'success');
+            }).catch(() => {
+              showStatus('Update failed - check logs', 'error');
+            });
+          } else {
+            showStatus('Wilson is up to date', 'success');
+          }
+        }).catch(() => {
+          showStatus('Failed to check for updates', 'error');
+        });
+        return true;
+
+      case '/check-updates':
+        showStatus('Checking for updates...', 'info');
+        updater.checkForUpdates().then(release => {
+          if (release) {
+            showStatus(`v${release.version} available - run /update`, 'info');
+          } else {
+            showStatus('Wilson is up to date', 'success');
+          }
+        }).catch(() => {
+          showStatus('Failed to check for updates', 'error');
+        });
         return true;
 
       default:

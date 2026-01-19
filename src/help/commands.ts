@@ -34,6 +34,8 @@ export const SLASH_COMMANDS: CommandDef[] = [
 
   // Session
   { name: 'logout', aliases: ['quit', 'exit'], description: 'Sign out', category: 'session' },
+  { name: 'update', aliases: [], description: 'Update Wilson to latest', category: 'session' },
+  { name: 'check-updates', aliases: [], description: 'Check for updates', category: 'session' },
 ];
 
 export const KEYBOARD_SHORTCUTS = [
