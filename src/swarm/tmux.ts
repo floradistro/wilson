@@ -1,9 +1,9 @@
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import type { SwarmConfig, SwarmWorker, SwarmState } from './types.js';
 
 // =============================================================================
 // tmux Session Manager
-// Creates a tmux session with large panes for Wilson workers
+// Creates a beautiful grid layout with Commander + Workers
 // =============================================================================
 
 const SESSION_PREFIX = 'wilson-swarm';
@@ -28,12 +28,16 @@ export function generateSessionName(): string {
 }
 
 /**
- * Create a swarm with 2 workers side by side (simpler, larger panes)
- * Layout:
- * ┌─────────────────────────┬─────────────────────────┐
- * │       Worker 1          │       Worker 2          │
- * │    (full Wilson UI)     │    (full Wilson UI)     │
- * └─────────────────────────┴─────────────────────────┘
+ * Create a swarm with Commander + 2 Workers
+ * Layout (3 panes in a nice arrangement):
+ *
+ * ┌─────────────────────────────────────────────────┐
+ * │              COMMANDER (red border)              │
+ * │         Main orchestrator - your view           │
+ * ├────────────────────────┬────────────────────────┤
+ * │      Worker 1          │      Worker 2          │
+ * │   (green border)       │   (green border)       │
+ * └────────────────────────┴────────────────────────┘
  */
 export function createSwarmSession(config: SwarmConfig): {
   sessionName: string;
@@ -44,63 +48,81 @@ export function createSwarmSession(config: SwarmConfig): {
   const sessionName = generateSessionName();
   const workers: SwarmWorker[] = [];
 
-  // Only use 2 workers for larger panes
-  const workerCount = 2;
-
-  // Create session with first pane
+  // Create session - first pane is Commander
   execSync(
-    `tmux new-session -d -s ${sessionName} -n swarm -x 200 -y 50`,
+    `tmux new-session -d -s ${sessionName} -n swarm`,
     { cwd: config.workingDirectory }
   );
 
-  // Configure tmux for better display
-  execSync(`tmux set-option -t ${sessionName} pane-border-format " #T "`);
+  // Get Commander pane ID
+  const commanderPane = execSync(
+    `tmux display-message -t ${sessionName}:0.0 -p '#{pane_id}'`,
+    { encoding: 'utf8' }
+  ).trim();
+
+  // Set Commander pane title
+  execSync(`tmux select-pane -t ${commanderPane} -T "COMMANDER"`);
+
+  // Split vertically - bottom half for workers (Commander gets top 40%)
+  execSync(`tmux split-window -t ${sessionName}:0.0 -v -l 60%`);
+
+  // Get Worker 1 pane
+  const worker1Pane = execSync(
+    `tmux display-message -t ${sessionName}:0.1 -p '#{pane_id}'`,
+    { encoding: 'utf8' }
+  ).trim();
+  execSync(`tmux select-pane -t ${worker1Pane} -T "Worker 1"`);
+
+  // Split the bottom half horizontally for Worker 2
+  execSync(`tmux split-window -t ${worker1Pane} -h -l 50%`);
+
+  // Get Worker 2 pane
+  const worker2Pane = execSync(
+    `tmux display-message -t ${sessionName}:0.2 -p '#{pane_id}'`,
+    { encoding: 'utf8' }
+  ).trim();
+  execSync(`tmux select-pane -t ${worker2Pane} -T "Worker 2"`);
+
+  // Configure pane borders and colors
+  // Commander gets RED border, workers get GREEN
+  execSync(`tmux set-option -t ${sessionName} pane-border-format " #{?#{==:#{pane_title},COMMANDER},#[fg=red bold],#[fg=green]}#T "`);
   execSync(`tmux set-option -t ${sessionName} pane-border-status top`);
   execSync(`tmux set-option -t ${sessionName} pane-border-style "fg=colour240"`);
-  execSync(`tmux set-option -t ${sessionName} pane-active-border-style "fg=green"`);
+  execSync(`tmux set-option -t ${sessionName} pane-active-border-style "fg=brightcyan,bold"`);
+
+  // Enable mouse for easy pane switching
+  execSync(`tmux set-option -t ${sessionName} mouse on`);
 
   // Disable status bar for cleaner look
   execSync(`tmux set-option -t ${sessionName} status off`);
 
-  // Get first pane ID (Worker 1)
-  const pane1 = execSync(
-    `tmux display-message -t ${sessionName}:0.0 -p '#{pane_id}'`,
-    { encoding: 'utf8' }
-  ).trim();
-  execSync(`tmux select-pane -t ${pane1} -T "Worker 1"`);
+  // Add workers to list
   workers.push({
     id: 'worker-1',
     name: 'Worker 1',
     status: 'idle',
-    paneId: pane1,
+    paneId: worker1Pane,
     tasksCompleted: 0,
     lastActivity: Date.now(),
   });
 
-  // Split horizontally for Worker 2 (50/50 split)
-  execSync(`tmux split-window -t ${sessionName}:0.0 -h -l 50%`);
-  const pane2 = execSync(
-    `tmux display-message -t ${sessionName}:0.1 -p '#{pane_id}'`,
-    { encoding: 'utf8' }
-  ).trim();
-  execSync(`tmux select-pane -t ${pane2} -T "Worker 2"`);
   workers.push({
     id: 'worker-2',
     name: 'Worker 2',
     status: 'idle',
-    paneId: pane2,
+    paneId: worker2Pane,
     tasksCompleted: 0,
     lastActivity: Date.now(),
   });
 
-  // Select first pane
-  execSync(`tmux select-pane -t ${pane1}`);
+  // Select Commander pane initially
+  execSync(`tmux select-pane -t ${commanderPane}`);
 
   return {
     sessionName,
     workers,
-    commanderPaneId: pane1,
-    validatorPaneId: pane2,
+    commanderPaneId: commanderPane,
+    validatorPaneId: commanderPane, // Not used
   };
 }
 
@@ -114,7 +136,6 @@ export function sendToPane(sessionName: string, paneId: string, command: string)
 
 /**
  * Start a Wilson instance with a specific task
- * Uses the regular wilson command with the task as initial query
  */
 export function startWorkerInPane(
   sessionName: string,
@@ -123,10 +144,22 @@ export function startWorkerInPane(
   workingDirectory: string,
   task: string
 ): void {
-  // Run wilson with the task as initial query
-  // Using --dangerously-skip-permissions so it can work autonomously
   const escapedTask = task.replace(/"/g, '\\"').replace(/'/g, "'\\''");
   const command = `cd "${workingDirectory}" && wilson --dangerously-skip-permissions "${escapedTask}"`;
+  sendToPane(sessionName, paneId, command);
+}
+
+/**
+ * Start the Commander Wilson (main orchestrator)
+ */
+export function startCommanderInPane(
+  sessionName: string,
+  paneId: string,
+  workingDirectory: string,
+  goal: string
+): void {
+  // Commander just monitors - starts Wilson normally so user can interact
+  const command = `cd "${workingDirectory}" && wilson`;
   sendToPane(sessionName, paneId, command);
 }
 
@@ -179,14 +212,14 @@ export function interruptPane(paneId: string): void {
 // =============================================================================
 
 /**
- * Spawn a swarm - creates tmux session with worker panes
+ * Spawn a swarm - creates tmux session with Commander + Workers
  */
 export function spawnSwarm(config: SwarmConfig): SwarmState {
   if (!isTmuxAvailable()) {
     throw new Error('tmux is not installed. Install it with: brew install tmux');
   }
 
-  const { sessionName, workers } = createSwarmSession(config);
+  const { sessionName, workers, commanderPaneId } = createSwarmSession(config);
 
   const state: SwarmState = {
     id: sessionName,
@@ -209,13 +242,29 @@ export function spawnSwarm(config: SwarmConfig): SwarmState {
     workingDirectory: config.workingDirectory,
   };
 
+  // Store commander pane ID in state for later use
+  (state as any).commanderPaneId = commanderPaneId;
+
   return state;
 }
 
 /**
- * Launch workers with their assigned tasks
+ * Launch Commander and Workers
  */
 export function launchSwarmProcesses(state: SwarmState, tasks: string[]): void {
+  const commanderPaneId = (state as any).commanderPaneId;
+
+  // Start Commander (interactive Wilson for user)
+  if (commanderPaneId) {
+    startCommanderInPane(
+      state.tmuxSession,
+      commanderPaneId,
+      state.workingDirectory,
+      state.goal
+    );
+  }
+
+  // Start Workers with their tasks
   state.workers.forEach((worker, index) => {
     const task = tasks[index] || state.goal;
     startWorkerInPane(
@@ -232,9 +281,15 @@ export function launchSwarmProcesses(state: SwarmState, tasks: string[]): void {
  * Shutdown the swarm gracefully
  */
 export async function shutdownSwarm(state: SwarmState): Promise<void> {
+  // Interrupt all panes
+  const commanderPaneId = (state as any).commanderPaneId;
+  if (commanderPaneId) {
+    interruptPane(commanderPaneId);
+  }
   for (const worker of state.workers) {
     interruptPane(worker.paneId);
   }
+
   await new Promise(resolve => setTimeout(resolve, 1000));
   killSession(state.tmuxSession);
 }

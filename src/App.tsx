@@ -451,6 +451,33 @@ export function App({ initialQuery, flags, command }: AppProps) {
     const trimmed = value.trim();
     if (!trimmed) return;
 
+    // IMPORTANT: Check /swarm commands FIRST (before general slash command matching)
+    // /swarm "goal" - start a swarm with the given goal
+    if (trimmed.toLowerCase().startsWith('/swarm ')) {
+      setInputValue('');
+      const afterSwarm = trimmed.slice(7).trim(); // Remove "/swarm "
+
+      // Check for subcommands
+      if (afterSwarm.toLowerCase() === 'status') {
+        handleSlashCommand('/swarm status');
+        return;
+      }
+      if (afterSwarm.toLowerCase() === 'stop' || afterSwarm.toLowerCase() === 'kill') {
+        handleSlashCommand('/swarm stop');
+        return;
+      }
+
+      // Otherwise it's a goal - strip quotes if present
+      const goal = afterSwarm.replace(/^["']|["']$/g, '').trim();
+      if (goal) {
+        setSwarmGoal(goal);
+        setViewMode('swarm');
+      } else {
+        showStatus('Usage: /swarm "your goal here"', 'warning');
+      }
+      return;
+    }
+
     // Check for slash commands (but not file paths like /Users/...)
     // Slash commands are: /word or /word word (e.g., /config edit)
     const slashCommandMatch = trimmed.match(/^\/([a-z?]+(?:\s+[a-z]+)?)$/i);
@@ -466,28 +493,6 @@ export function App({ initialQuery, flags, command }: AppProps) {
       } else {
         showStatus(`Unknown command: ${trimmed}. Type /help for available commands.`, 'warning');
       }
-      return;
-    }
-
-    // Check for /swarm "goal" command (with argument)
-    const swarmMatch = trimmed.match(/^\/swarm\s+["']?(.+?)["']?$/i);
-    if (swarmMatch) {
-      setInputValue('');
-      const goal = swarmMatch[1].trim();
-      if (goal) {
-        setSwarmGoal(goal);
-        setViewMode('swarm');
-      } else {
-        showStatus('Usage: /swarm "your goal here"', 'warning');
-      }
-      return;
-    }
-
-    // Check for /swarm status or /swarm stop
-    const swarmSubcommandMatch = trimmed.match(/^\/swarm\s+(status|stop|kill)$/i);
-    if (swarmSubcommandMatch) {
-      setInputValue('');
-      handleSlashCommand(`/swarm ${swarmSubcommandMatch[1]}`);
       return;
     }
 

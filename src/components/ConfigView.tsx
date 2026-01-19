@@ -33,7 +33,7 @@ interface SettingItem {
   type: 'boolean' | 'number' | 'select' | 'readonly';
   value: unknown;
   options?: string[];
-  path: string[]; // Path in settings object
+  path: string[];
 }
 
 function SettingsView({ onExit }: { onExit?: () => void }) {
@@ -42,27 +42,18 @@ function SettingsView({ onExit }: { onExit?: () => void }) {
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // Build flat list of editable settings
   const items: SettingItem[] = [
-    // Formatting
     { id: 'style', section: 'Formatting', label: 'Style', type: 'select', value: settings.formatting.style, options: ['terminal', 'markdown', 'plain'], path: ['formatting', 'style'] },
     { id: 'maxLines', section: 'Formatting', label: 'Max lines', type: 'number', value: settings.formatting.maxLines, path: ['formatting', 'maxLines'] },
     { id: 'maxBullets', section: 'Formatting', label: 'Max bullets', type: 'number', value: settings.formatting.maxBulletPoints, path: ['formatting', 'maxBulletPoints'] },
     { id: 'preferTables', section: 'Formatting', label: 'Use tables', type: 'boolean', value: settings.formatting.preferTables, path: ['formatting', 'preferTables'] },
     { id: 'statusFirst', section: 'Formatting', label: 'Status first', type: 'boolean', value: settings.formatting.statusFirst, path: ['formatting', 'statusFirst'] },
-    // Context
     { id: 'maxTokens', section: 'Context', label: 'Max tokens', type: 'number', value: settings.context.maxTokens, path: ['context', 'maxTokens'] },
     { id: 'compactAt', section: 'Context', label: 'Compact at', type: 'number', value: settings.context.compactionThreshold, path: ['context', 'compactionThreshold'] },
     { id: 'keepTurns', section: 'Context', label: 'Keep turns', type: 'number', value: settings.context.preserveRecentTurns, path: ['context', 'preserveRecentTurns'] },
-    // Hooks (readonly)
-    { id: 'preToolHooks', section: 'Hooks', label: 'PreToolUse', type: 'readonly', value: `${settings.hooks.PreToolUse.length} hooks`, path: [] },
-    { id: 'postToolHooks', section: 'Hooks', label: 'PostToolUse', type: 'readonly', value: `${settings.hooks.PostToolUse.length} hooks`, path: [] },
   ];
 
-  const editableItems = items.filter(i => i.type !== 'readonly');
-
   useInput((input, key) => {
-    // Navigation
     if (key.upArrow) {
       setSelectedIndex(i => Math.max(0, i - 1));
       return;
@@ -71,54 +62,39 @@ function SettingsView({ onExit }: { onExit?: () => void }) {
       setSelectedIndex(i => Math.min(items.length - 1, i + 1));
       return;
     }
-
-    // Toggle/Edit on Enter or Space
     if (input === ' ' || key.return) {
       const item = items[selectedIndex];
-      if (item.type === 'readonly') return;
-
       if (item.type === 'boolean') {
         updateSetting(item.path, !item.value);
       } else if (item.type === 'select' && item.options) {
-        const currentIdx = item.options.indexOf(item.value as string);
-        const nextIdx = (currentIdx + 1) % item.options.length;
-        updateSetting(item.path, item.options[nextIdx]);
+        const idx = item.options.indexOf(item.value as string);
+        updateSetting(item.path, item.options[(idx + 1) % item.options.length]);
       } else if (item.type === 'number') {
-        // Increment by 5 for tokens, 1 for others
-        const increment = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
-        updateSetting(item.path, (item.value as number) + increment);
+        const inc = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
+        updateSetting(item.path, (item.value as number) + inc);
       }
       return;
     }
-
-    // Decrease number with - or left arrow
     if ((input === '-' || key.leftArrow) && items[selectedIndex].type === 'number') {
       const item = items[selectedIndex];
-      const decrement = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
-      const newValue = Math.max(1, (item.value as number) - decrement);
-      updateSetting(item.path, newValue);
+      const dec = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
+      updateSetting(item.path, Math.max(1, (item.value as number) - dec));
       return;
     }
-
-    // Increase number with + or right arrow
     if ((input === '+' || input === '=' || key.rightArrow) && items[selectedIndex].type === 'number') {
       const item = items[selectedIndex];
-      const increment = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
-      updateSetting(item.path, (item.value as number) + increment);
+      const inc = item.path.includes('maxTokens') || item.path.includes('compactionThreshold') ? 10000 : 5;
+      updateSetting(item.path, (item.value as number) + inc);
       return;
     }
-
-    // Save with 's'
     if (input === 's' && dirty) {
       saveSettings();
       return;
     }
-
-    // Exit
     if (key.escape) {
       if (dirty) {
-        setMessage('Unsaved changes! Press s to save, Esc again to discard');
-        setDirty(false); // Allow second Esc to exit
+        setMessage('Unsaved! s=save, Esc=discard');
+        setDirty(false);
       } else {
         onExit?.();
       }
@@ -130,9 +106,7 @@ function SettingsView({ onExit }: { onExit?: () => void }) {
     setSettings(prev => {
       const updated = JSON.parse(JSON.stringify(prev));
       let obj = updated;
-      for (let i = 0; i < path.length - 1; i++) {
-        obj = obj[path[i]];
-      }
+      for (let i = 0; i < path.length - 1; i++) obj = obj[path[i]];
       obj[path[path.length - 1]] = value;
       return updated;
     });
@@ -142,223 +116,181 @@ function SettingsView({ onExit }: { onExit?: () => void }) {
 
   function saveSettings() {
     try {
-      const cwd = process.cwd();
-      const settingsPath = join(cwd, '.wilson', 'settings.json');
+      const settingsPath = join(process.cwd(), '.wilson', 'settings.json');
       writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
       clearSettingsCache();
       setDirty(false);
-      setMessage('Settings saved!');
+      setMessage('Saved!');
       setTimeout(() => setMessage(null), 2000);
     } catch (err) {
-      setMessage(`Error saving: ${err}`);
+      setMessage(`Error: ${err}`);
     }
   }
 
-  // Group items by section for display
   let currentSection = '';
-
   return (
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold color={COLORS.primary}>wilson</Text>
         <Text color={COLORS.textDim}> - Settings</Text>
-        {dirty && <Text color={COLORS.warning}> (modified)</Text>}
+        {dirty && <Text color={COLORS.warning}> *</Text>}
       </Box>
-
       <Box flexDirection="column">
         {items.map((item, idx) => {
           const showSection = item.section !== currentSection;
           currentSection = item.section;
           const isSelected = idx === selectedIndex;
-          const isEditable = item.type !== 'readonly';
-
           return (
             <Box key={item.id} flexDirection="column">
-              {showSection && (
-                <Box marginTop={idx > 0 ? 1 : 0}>
-                  <Text bold color={COLORS.text}>{item.section}</Text>
-                </Box>
-              )}
+              {showSection && <Text bold color={COLORS.text}>{item.section}</Text>}
               <Box marginLeft={2}>
-                <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
-                  {isSelected ? '▸ ' : '  '}
-                </Text>
-                <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
-                  {item.label.padEnd(14)}
-                </Text>
-                <Text color={isEditable ? (isSelected ? COLORS.text : COLORS.textMuted) : COLORS.textDim}>
-                  {formatValue(item)}
-                </Text>
-                {isSelected && isEditable && (
-                  <Text color={COLORS.textDim}>
-                    {item.type === 'boolean' ? ' (space to toggle)' :
-                     item.type === 'select' ? ' (space to cycle)' :
-                     ' (←/→ to adjust)'}
-                  </Text>
-                )}
+                <Text color={isSelected ? COLORS.primary : COLORS.textDim}>{isSelected ? '▸ ' : '  '}</Text>
+                <Text color={isSelected ? COLORS.primary : COLORS.textDim}>{item.label.padEnd(14)}</Text>
+                <Text color={isSelected ? COLORS.text : COLORS.textMuted}>{formatValue(item)}</Text>
               </Box>
             </Box>
           );
         })}
       </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        {message && (
-          <Text color={message.includes('Error') ? COLORS.error : COLORS.success}>{message}</Text>
-        )}
-        <Box>
-          <Text color={COLORS.textDim}>↑↓ navigate | Space/Enter edit | </Text>
-          {dirty && <Text color={COLORS.warning}>s save | </Text>}
-          <Text color={COLORS.textDim}>Esc exit</Text>
-        </Box>
+      <Box marginTop={1}>
+        {message && <Text color={message.includes('Error') ? COLORS.error : COLORS.success}>{message} </Text>}
+        <Text color={COLORS.textDim}>↑↓ Space ←→ | s save | Esc</Text>
       </Box>
     </Box>
   );
 }
 
 function formatValue(item: SettingItem): string {
-  if (item.type === 'boolean') {
-    return item.value ? '[ON]' : '[OFF]';
-  }
+  if (item.type === 'boolean') return item.value ? '[ON]' : '[OFF]';
   if (item.type === 'number') {
     const n = item.value as number;
-    if (n >= 1000) return `${(n / 1000).toFixed(0)}K`;
-    return String(n);
+    return n >= 1000 ? `${(n / 1000).toFixed(0)}K` : String(n);
   }
   return String(item.value);
 }
 
 // =============================================================================
-// Rules View - Interactive WILSON.md editor
+// Rules View - List of toggleable rules
 // =============================================================================
 
+interface Rule {
+  id: string;
+  text: string;
+  enabled: boolean;
+}
+
+function parseRules(content: string): Rule[] {
+  return content
+    .split('\n')
+    .filter(l => l.trim() && !l.startsWith('#'))  // Skip headers and blank lines
+    .map((line, i) => {
+      const disabled = line.startsWith('//') || line.startsWith('DISABLED:');
+      const text = line.replace(/^\/\/\s*|^DISABLED:\s*/, '').replace(/^-\s*/, '').trim();
+      return { id: `r${i}`, text, enabled: !disabled };
+    })
+    .filter(r => r.text.length > 0);
+}
+
+function serializeRules(rules: Rule[]): string {
+  const header = `# Wilson Rules\n\n`;
+  const body = rules.map(r => r.enabled ? `- ${r.text}` : `// ${r.text}`).join('\n');
+  return header + body;
+}
+
 function RulesView({ onExit }: { onExit?: () => void }) {
-  const [lines, setLines] = useState<string[]>(() => loadMemory().split('\n'));
-  const [selectedLine, setSelectedLine] = useState(0);
+  const [rules, setRules] = useState<Rule[]>(() => parseRules(loadMemory()));
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [editMode, setEditMode] = useState(false);
   const [editBuffer, setEditBuffer] = useState('');
   const [dirty, setDirty] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  const [scrollOffset, setScrollOffset] = useState(0);
-  const visibleLines = 18;
-
-  // Keep selected line in view
-  useEffect(() => {
-    if (selectedLine < scrollOffset) {
-      setScrollOffset(selectedLine);
-    } else if (selectedLine >= scrollOffset + visibleLines) {
-      setScrollOffset(selectedLine - visibleLines + 1);
-    }
-  }, [selectedLine, scrollOffset]);
 
   useInput((input, key) => {
-    // Edit mode - typing into line
+    // Edit mode
     if (editMode) {
       if (key.escape) {
         setEditMode(false);
-        setEditBuffer('');
         return;
       }
       if (key.return) {
-        // Save the edit
-        setLines(prev => {
-          const updated = [...prev];
-          updated[selectedLine] = editBuffer;
-          return updated;
-        });
+        if (editBuffer.trim()) {
+          setRules(prev => {
+            const updated = [...prev];
+            updated[selectedIndex] = { ...updated[selectedIndex], text: editBuffer.trim() };
+            return updated;
+          });
+          setDirty(true);
+        }
         setEditMode(false);
-        setEditBuffer('');
-        setDirty(true);
-        setMessage(null);
+        // Move to next line after save
+        setSelectedIndex(i => Math.min(i + 1, rules.length - 1));
         return;
       }
       if (key.backspace) {
         setEditBuffer(b => b.slice(0, -1));
         return;
       }
-      if (key.tab) {
-        // Tab = 2 spaces (common for markdown)
-        setEditBuffer(b => b + '  ');
-        return;
-      }
-      // Space and all other printable chars
-      if (input && !key.ctrl && !key.meta) {
+      // All printable chars including space
+      if (input) {
         setEditBuffer(b => b + input);
         return;
       }
       return;
     }
 
-    // Navigation mode
+    // Navigation
     if (key.upArrow) {
-      setSelectedLine(i => Math.max(0, i - 1));
+      setSelectedIndex(i => Math.max(0, i - 1));
       return;
     }
     if (key.downArrow) {
-      setSelectedLine(i => Math.min(lines.length - 1, i + 1));
+      setSelectedIndex(i => Math.min(rules.length - 1, i + 1));
       return;
     }
 
-    // Enter edit mode
+    // Toggle with space
+    if (input === ' ') {
+      if (rules.length > 0) {
+        setRules(prev => {
+          const updated = [...prev];
+          updated[selectedIndex] = { ...updated[selectedIndex], enabled: !updated[selectedIndex].enabled };
+          return updated;
+        });
+        setDirty(true);
+      }
+      return;
+    }
+
+    // Edit with enter or 'e'
     if (key.return || input === 'e') {
-      setEditMode(true);
-      setEditBuffer(lines[selectedLine] || '');
+      if (rules.length > 0) {
+        setEditMode(true);
+        setEditBuffer(rules[selectedIndex].text);
+      }
       return;
     }
 
-    // Add new line after current (o = edit, Enter in nav = blank line)
-    if (input === 'o') {
-      setLines(prev => {
-        const updated = [...prev];
-        updated.splice(selectedLine + 1, 0, '');
-        return updated;
-      });
-      setSelectedLine(i => i + 1);
-      setEditMode(true);
-      setEditBuffer('');
-      setDirty(true);
-      return;
-    }
-
-    // Add blank line after current (quick spacing)
-    if (key.return) {
-      setLines(prev => {
-        const updated = [...prev];
-        updated.splice(selectedLine + 1, 0, '');
-        return updated;
-      });
-      setSelectedLine(i => i + 1);
-      setDirty(true);
-      return;
-    }
-
-    // Add new line before current
-    if (input === 'O') {
-      setLines(prev => {
-        const updated = [...prev];
-        updated.splice(selectedLine, 0, '');
-        return updated;
-      });
+    // Add new rule
+    if (input === 'a') {
+      const newRule: Rule = { id: `r${Date.now()}`, text: 'New rule', enabled: true };
+      setRules(prev => [...prev, newRule]);
+      setSelectedIndex(rules.length);
       setEditMode(true);
       setEditBuffer('');
       setDirty(true);
       return;
     }
 
-    // Delete line
-    if (input === 'd' && lines.length > 1) {
-      setLines(prev => {
-        const updated = [...prev];
-        updated.splice(selectedLine, 1);
-        return updated;
-      });
-      setSelectedLine(i => Math.min(i, lines.length - 2));
+    // Delete
+    if (input === 'd' && rules.length > 0) {
+      setRules(prev => prev.filter((_, i) => i !== selectedIndex));
+      setSelectedIndex(i => Math.max(0, Math.min(i, rules.length - 2)));
       setDirty(true);
       return;
     }
 
     // Save
-    if (input === 's' && dirty) {
+    if (input === 's') {
       saveRules();
       return;
     }
@@ -366,7 +298,7 @@ function RulesView({ onExit }: { onExit?: () => void }) {
     // Exit
     if (key.escape) {
       if (dirty) {
-        setMessage('Unsaved changes! Press s to save, Esc again to discard');
+        setMessage('Unsaved! s=save, Esc=discard');
         setDirty(false);
       } else {
         onExit?.();
@@ -377,78 +309,67 @@ function RulesView({ onExit }: { onExit?: () => void }) {
 
   function saveRules() {
     try {
-      const cwd = process.cwd();
-      const rulesPath = existsSync(join(cwd, 'WILSON.md'))
-        ? join(cwd, 'WILSON.md')
-        : join(cwd, '.wilson', 'WILSON.md');
-      writeFileSync(rulesPath, lines.join('\n'));
+      const rulesPath = existsSync(join(process.cwd(), 'WILSON.md'))
+        ? join(process.cwd(), 'WILSON.md')
+        : join(process.cwd(), '.wilson', 'WILSON.md');
+      writeFileSync(rulesPath, serializeRules(rules));
       clearSettingsCache();
       setDirty(false);
-      setMessage('Rules saved!');
+      setMessage('Saved!');
       setTimeout(() => setMessage(null), 2000);
     } catch (err) {
-      setMessage(`Error saving: ${err}`);
+      setMessage(`Error: ${err}`);
     }
   }
-
-  const displayLines = lines.slice(scrollOffset, scrollOffset + visibleLines);
 
   return (
     <Box flexDirection="column" padding={1}>
       <Box marginBottom={1}>
         <Text bold color={COLORS.primary}>wilson</Text>
-        <Text color={COLORS.textDim}> - Rules (WILSON.md)</Text>
-        {dirty && <Text color={COLORS.warning}> (modified)</Text>}
-        {lines.length > visibleLines && (
-          <Text color={COLORS.textDim}> [{scrollOffset + 1}-{Math.min(scrollOffset + visibleLines, lines.length)}/{lines.length}]</Text>
-        )}
+        <Text color={COLORS.textDim}> - Rules [{rules.length}]</Text>
+        {dirty && <Text color={COLORS.warning}> *</Text>}
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        {displayLines.map((line, i) => {
-          const lineIndex = scrollOffset + i;
-          const isSelected = lineIndex === selectedLine;
-          const isEditing = isSelected && editMode;
-          const isHeader = line.startsWith('#');
-
-          return (
-            <Box key={lineIndex}>
-              <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
-                {isSelected ? '▸ ' : '  '}
-              </Text>
-              <Text color={COLORS.textDim} dimColor>
-                {String(lineIndex + 1).padStart(3, ' ')}
-              </Text>
-              {isEditing ? (
-                <Text color={COLORS.text}>
-                  {editBuffer}
-                  <Text color={COLORS.primary}>█</Text>
+        {rules.length === 0 ? (
+          <Text color={COLORS.textDim}>No rules. Press 'a' to add.</Text>
+        ) : (
+          rules.slice(0, 12).map((rule, i) => {
+            const isSelected = i === selectedIndex;
+            const isEditing = isSelected && editMode;
+            return (
+              <Box key={rule.id}>
+                <Text color={isSelected ? COLORS.primary : COLORS.textDim}>
+                  {isSelected ? '▸' : ' '}
                 </Text>
-              ) : (
-                <Text color={isHeader ? COLORS.primary : (isSelected ? COLORS.text : COLORS.textMuted)}>
-                  {line || ' '}
+                <Text color={rule.enabled ? COLORS.success : COLORS.textDim}>
+                  {rule.enabled ? '●' : '○'}
                 </Text>
-              )}
-            </Box>
-          );
-        })}
+                <Text> </Text>
+                {isEditing ? (
+                  <Text color={COLORS.text}>{editBuffer}<Text color={COLORS.primary}>│</Text></Text>
+                ) : (
+                  <Text
+                    color={isSelected ? COLORS.text : (rule.enabled ? COLORS.textMuted : COLORS.textDim)}
+                    dimColor={!rule.enabled}
+                  >
+                    {rule.text.length > 65 ? rule.text.slice(0, 62) + '...' : rule.text}
+                  </Text>
+                )}
+              </Box>
+            );
+          })
+        )}
+        {rules.length > 12 && <Text color={COLORS.textDim}>  +{rules.length - 12} more</Text>}
       </Box>
 
-      <Box marginTop={1} flexDirection="column">
-        {message && (
-          <Text color={message.includes('Error') ? COLORS.error : COLORS.success}>{message}</Text>
+      <Box>
+        {message && <Text color={message.includes('Error') ? COLORS.error : COLORS.success}>{message} </Text>}
+        {editMode ? (
+          <Text color={COLORS.textDim}>Type | Enter=save+next | Esc=cancel</Text>
+        ) : (
+          <Text color={COLORS.textDim}>↑↓ | Space=toggle | Enter=edit | a=add | d=del | s=save | Esc</Text>
         )}
-        <Box>
-          {editMode ? (
-            <Text color={COLORS.info}>EDIT: Type to edit | Enter to save | Esc to cancel</Text>
-          ) : (
-            <>
-              <Text color={COLORS.textDim}>↑↓ nav | e edit | Enter blank | o/O new line | d del | </Text>
-              {dirty && <Text color={COLORS.warning}>s save | </Text>}
-              <Text color={COLORS.textDim}>Esc</Text>
-            </>
-          )}
-        </Box>
       </Box>
     </Box>
   );
