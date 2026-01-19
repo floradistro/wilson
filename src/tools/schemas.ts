@@ -495,7 +495,7 @@ ACTIONS:
 - start: Start dev server (auto-detects framework)
 - stop: Stop a managed dev server
 - restart: Restart dev server (preserves port)
-- kill: Kill any process by PID
+- kill: Kill process by PID or kill all processes on a port
 - logs: Get server output (managed servers only)
 - status: Check if server is running
 - check-change: Check if file change needs restart vs hot-reload
@@ -518,7 +518,7 @@ HOT RELOAD vs RESTART:
       id: { type: 'string', description: 'Server ID (for stop/restart/logs)' },
       pid: { type: 'number', description: 'Process ID (for kill action)' },
       command: { type: 'string', description: 'Custom start command (default: auto-detected)' },
-      port: { type: 'number', description: 'Port to use (default: framework default)' },
+      port: { type: 'number', description: 'Port number - for start (default: framework default), or for kill (kills all processes on that port)' },
       file: { type: 'string', description: 'File path (for check-change action)' },
     },
     required: ['action'],

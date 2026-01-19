@@ -512,14 +512,24 @@ function stopServer(id: string): boolean {
 
   try {
     server.status = 'stopped';
-    server.child.kill('SIGTERM');
 
-    // Force kill after 5 seconds
+    // Try SIGTERM first
+    try {
+      server.child.kill('SIGTERM');
+    } catch {}
+
+    // Also try to kill by PID directly (more reliable)
+    try {
+      process.kill(server.pid, 'SIGTERM');
+    } catch {}
+
+    // Force kill after 1 second (faster)
     setTimeout(() => {
       try {
         server.child.kill('SIGKILL');
+        process.kill(server.pid, 'SIGKILL');
       } catch {}
-    }, 5000);
+    }, 1000);
 
     if (server.watcher) {
       server.watcher.close();
@@ -528,6 +538,34 @@ function stopServer(id: string): boolean {
     servers.delete(id);
     return true;
   } catch {
+    servers.delete(id); // Still remove from registry
+    return false;
+  }
+}
+
+/**
+ * Force kill a process by PID - works for any process, not just managed ones
+ */
+function forceKillPid(pid: number): boolean {
+  try {
+    // Try SIGTERM first
+    process.kill(pid, 'SIGTERM');
+
+    // Then SIGKILL after 500ms
+    setTimeout(() => {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
+    }, 500);
+
+    // Also try to kill via shell for stubborn processes
+    try {
+      execSync(`kill -9 ${pid} 2>/dev/null || true`, { timeout: 2000 });
+    } catch {}
+
+    return true;
+  } catch (error) {
+    // Process might already be dead
     return false;
   }
 }
@@ -793,35 +831,47 @@ export const devServerTool: Tool = {
       }
 
       // =====================================================================
-      // KILL - Kill a process by PID (system-wide)
+      // KILL - Kill a process by PID (system-wide) - FORCEFUL
       // =====================================================================
       case 'kill': {
         const targetPid = params.pid as number;
-        if (!targetPid) {
-          return { success: false, error: 'Missing pid parameter' };
-        }
+        const targetPort = params.port as number;
 
-        try {
-          process.kill(targetPid, 'SIGTERM');
-
-          // Also remove from managed servers if present
-          for (const [serverId, server] of servers.entries()) {
-            if (server.pid === targetPid) {
-              servers.delete(serverId);
-              break;
-            }
+        // Kill by port if specified
+        if (targetPort) {
+          try {
+            execSync(`lsof -ti:${targetPort} | xargs kill -9 2>/dev/null || true`, { timeout: 5000 });
+            return {
+              success: true,
+              content: `Killed all processes on port ${targetPort}`,
+            };
+          } catch {
+            return {
+              success: true, // Might already be dead
+              content: `Port ${targetPort} cleared`,
+            };
           }
-
-          return {
-            success: true,
-            content: `Sent SIGTERM to process ${targetPid}`,
-          };
-        } catch (error) {
-          return {
-            success: false,
-            error: `Failed to kill process ${targetPid}: ${error instanceof Error ? error.message : 'Unknown error'}`,
-          };
         }
+
+        if (!targetPid) {
+          return { success: false, error: 'Missing pid or port parameter' };
+        }
+
+        // Force kill by PID
+        forceKillPid(targetPid);
+
+        // Also remove from managed servers if present
+        for (const [serverId, server] of servers.entries()) {
+          if (server.pid === targetPid) {
+            servers.delete(serverId);
+            break;
+          }
+        }
+
+        return {
+          success: true,
+          content: `Killed process ${targetPid}`,
+        };
       }
 
       // =====================================================================
