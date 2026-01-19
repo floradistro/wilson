@@ -159,33 +159,49 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Detect actual loops, not legitimate multi-calls
+    // LOOP DETECTION: Balanced approach - catch real loops, allow legitimate multi-calls
     // sessionToolHistory contains "toolName:paramHash" strings
 
-    // Only check for EXACT duplicate calls (same tool + same params) in a row
-    // This catches true loops where AI keeps calling same thing repeatedly
-    if (sessionToolHistory.length >= 4) {
-      const last4 = sessionToolHistory.slice(-4);
-      // All 4 must be identical (same tool, same params) to be a loop
-      if (last4[0] === last4[1] && last4[1] === last4[2] && last4[2] === last4[3]) {
-        const toolName = last4[0].split(':')[0];
-        setError(`Loop detected: ${toolName} called 4 times with identical parameters. Use /clear to reset.`);
+    // Look at recent calls only (last 20) to detect patterns
+    const recentHistory = sessionToolHistory.slice(-20);
+
+    // 1. Check for EXACT duplicate calls (same tool + same params) 3+ times in a row
+    if (recentHistory.length >= 3) {
+      const last3 = recentHistory.slice(-3);
+      if (last3[0] === last3[1] && last3[1] === last3[2]) {
+        const toolName = last3[0].split(':')[0];
+        setError(`Loop detected: ${toolName} called 3 times with identical parameters. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
         return;
       }
     }
 
-    // Count unique vs duplicate calls - loops have many duplicates
-    // Legitimate use: analytics(summary), analytics(trend), analytics(by_location) = 3 unique
-    // Loop: analytics(summary), analytics(summary), analytics(summary) = 3 duplicate
-    const callCounts = sessionToolHistory.reduce((acc, call) => {
+    // 2. Count same TOOL NAME in recent history (catches Edit loops with different params)
+    // Exception: analytics is allowed up to 5 calls (summary, trend, by_location, etc.)
+    const toolNameCounts = recentHistory.reduce((acc, call) => {
+      const name = call.split(':')[0];
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    for (const [toolName, count] of Object.entries(toolNameCounts)) {
+      // Analytics gets higher limit since it legitimately needs multiple query_types
+      const limit = toolName.toLowerCase() === 'analytics' ? 6 : 8;
+      if (count >= limit) {
+        setError(`Loop detected: ${toolName} called ${count} times. Use /clear to reset.`);
+        updateLastMessage({ isStreaming: false });
+        return;
+      }
+    }
+
+    // 3. Check for exact duplicate calls anywhere in recent history (5+ = loop)
+    const callCounts = recentHistory.reduce((acc, call) => {
       acc[call] = (acc[call] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
     const maxDuplicates = Math.max(...Object.values(callCounts), 0);
     if (maxDuplicates >= 5) {
-      // Same exact call 5+ times = definitely a loop
       const problematicCall = Object.entries(callCounts).find(([_, count]) => count >= 5)?.[0];
       const toolName = problematicCall?.split(':')[0] || 'tool';
       setError(`Loop detected: ${toolName} called ${maxDuplicates} times with same parameters. Use /clear to reset.`);
