@@ -81,8 +81,11 @@ Respond with ONLY a JSON array of ${workerCount} task descriptions, nothing else
     console.error('Failed to decompose goal:', err);
   }
 
-  // Fallback: just use the goal for both workers
-  return [goal, goal];
+  // Fallback: create simple task descriptions
+  return [
+    `Part 1 of "${goal}" - Focus on the first half of this task`,
+    `Part 2 of "${goal}" - Focus on the second half of this task`
+  ];
 }
 
 /**
@@ -107,8 +110,8 @@ export async function startSwarm(config: SwarmConfig): Promise<SwarmState> {
     config.storeId,
     2 // Always 2 workers for clean layout
   );
-  console.log(`   Task 1: ${tasks[0]?.slice(0, 50)}...`);
-  console.log(`   Task 2: ${tasks[1]?.slice(0, 50)}...`);
+  console.log(`   Worker 1: ${tasks[0]?.slice(0, 60)}${tasks[0]?.length > 60 ? '...' : ''}`);
+  console.log(`   Worker 2: ${tasks[1]?.slice(0, 60)}${tasks[1]?.length > 60 ? '...' : ''}`);
   console.log('');
 
   // Create tmux session with 2 panes

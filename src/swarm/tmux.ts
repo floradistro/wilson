@@ -144,8 +144,14 @@ export function startWorkerInPane(
   workingDirectory: string,
   task: string
 ): void {
-  const escapedTask = task.replace(/"/g, '\\"').replace(/'/g, "'\\''");
-  const command = `cd "${workingDirectory}" && wilson --dangerously-skip-permissions "${escapedTask}"`;
+  // Write task to a temp file to avoid shell escaping issues
+  const taskFile = `/tmp/wilson-task-${workerId}-${Date.now()}.txt`;
+  const fs = require('fs');
+  fs.writeFileSync(taskFile, task);
+
+  // Use cat to read the task and pipe to wilson, or use xargs
+  // Simpler: just use a heredoc-style approach
+  const command = `cd "${workingDirectory}" && wilson --dangerously-skip-permissions "$(cat ${taskFile})" && rm ${taskFile}`;
   sendToPane(sessionName, paneId, command);
 }
 
