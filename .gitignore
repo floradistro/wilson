@@ -4,3 +4,6 @@ dist/
 *.log
 .env
 .env.*
+
+# Supabase temp files
+supabase/.temp/
