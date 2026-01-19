@@ -4,7 +4,7 @@ import { BarChart } from './BarChart.js';
 import { LineChart } from './LineChart.js';
 import { DonutChart } from './DonutChart.js';
 import { MetricsCard } from './MetricsCard.js';
-import { Table } from './Table.js';
+import { Table, isTabularData, objectsToTable } from './Table.js';
 
 interface ChartRendererProps {
   /** Raw data that may contain chart configuration */
@@ -56,6 +56,7 @@ function renderChart(chart: ChartData): JSX.Element {
         <LineChart
           title={chart.title}
           data={chart.data}
+          isCurrency={(chart as { isCurrency?: boolean }).isCurrency}
         />
       );
 
@@ -87,65 +88,21 @@ function renderChart(chart: ChartData): JSX.Element {
       );
 
     default:
-      return <Text dimColor>Unknown chart type</Text>;
+      // Return null for unknown types instead of showing error
+      return <></>;
   }
 }
 
 /**
  * Extract chart data from various input formats.
+ * Simplified to avoid multiple extraction paths causing duplicate detection.
  */
 function extractChartData(data: unknown, fallbackTitle?: string): ChartData | null {
-  // Handle null/undefined
-  if (!data) {
-    return null;
-  }
+  // Unwrap to get the actual data object
+  const obj = unwrapData(data);
+  if (!obj) return null;
 
-  // Handle JSON string (tool results often come as JSON strings)
-  if (typeof data === 'string') {
-    try {
-      const parsed = JSON.parse(data);
-      return extractChartData(parsed, fallbackTitle);
-    } catch {
-      return null;
-    }
-  }
-
-  if (typeof data !== 'object') {
-    return null;
-  }
-
-  const obj = data as Record<string, unknown>;
-
-  // Check if there's a content field that might be JSON (common in tool results)
-  if (typeof obj.content === 'string' && obj.content.trim().startsWith('{')) {
-    try {
-      const parsed = JSON.parse(obj.content);
-      const chartFromContent = extractChartData(parsed, fallbackTitle);
-      if (chartFromContent) {
-        return chartFromContent;
-      }
-    } catch {
-      // Continue with normal extraction
-    }
-  }
-
-  // Check if there's a data field that might be JSON string (MCP tool results)
-  if (typeof obj.data === 'string') {
-    const trimmed = obj.data.trim();
-    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
-      try {
-        const parsed = JSON.parse(obj.data);
-        const chartFromData = extractChartData(parsed, fallbackTitle);
-        if (chartFromData) {
-          return chartFromData;
-        }
-      } catch {
-        // Continue with normal extraction
-      }
-    }
-  }
-
-  // Case 1: Explicit chart wrapper { chart: { ... } }
+  // Priority 1: Explicit chart wrapper { chart: { type, data } }
   if (obj.chart && typeof obj.chart === 'object') {
     const chart = obj.chart as Record<string, unknown>;
     if (isValidChartData(chart)) {
@@ -153,29 +110,67 @@ function extractChartData(data: unknown, fallbackTitle?: string): ChartData | nu
     }
   }
 
-  // Case 2: Direct chart data { type: 'bar', data: [...] }
+  // Priority 2: Direct chart data { type: 'bar', data: [...] }
   if (isValidChartData(obj)) {
     return obj as ChartData;
   }
 
-  // Case 3: Auto-detect from the current object (handles query_type at top level)
-  // This MUST run before checking nested obj.data to handle analytics responses
-  const autoDetected = autoDetectChart(obj, fallbackTitle);
-  if (autoDetected) {
-    return autoDetected;
-  }
+  // Priority 3: Auto-detect from data structure (analytics responses)
+  return autoDetectChart(obj, fallbackTitle);
+}
 
-  // Case 4: Check if data is already a parsed object (direct MCP result)
-  // Only check this if autoDetect didn't match - prevents double-processing
-  if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) {
-    const chartFromData = extractChartData(obj.data, fallbackTitle);
-    if (chartFromData) {
-      return chartFromData;
+/**
+ * Unwrap nested data structures to get the actual object.
+ * Handles JSON strings, content wrappers, etc.
+ */
+function unwrapData(data: unknown): Record<string, unknown> | null {
+  if (!data) return null;
+
+  // Parse JSON string
+  if (typeof data === 'string') {
+    try {
+      return unwrapData(JSON.parse(data));
+    } catch {
+      return null;
     }
   }
 
-  return null;
+  if (typeof data !== 'object') return null;
+
+  const obj = data as Record<string, unknown>;
+
+  // Unwrap content field if it's JSON
+  if (typeof obj.content === 'string' && obj.content.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(obj.content);
+      if (typeof parsed === 'object' && parsed !== null) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      // Continue with obj
+    }
+  }
+
+  // Unwrap data field if it's JSON string
+  if (typeof obj.data === 'string') {
+    const trimmed = obj.data.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(obj.data);
+        if (typeof parsed === 'object' && parsed !== null) {
+          return parsed as Record<string, unknown>;
+        }
+      } catch {
+        // Continue with obj
+      }
+    }
+  }
+
+  return obj;
 }
+
+// Valid chart types we can render
+const VALID_CHART_TYPES = ['bar', 'line', 'donut', 'pie', 'metrics', 'table'];
 
 /**
  * Validate that an object has the required chart structure.
@@ -184,6 +179,11 @@ function isValidChartData(obj: Record<string, unknown>): boolean {
   const type = obj.type;
 
   if (typeof type !== 'string') {
+    return false;
+  }
+
+  // Must be a known chart type
+  if (!VALID_CHART_TYPES.includes(type)) {
     return false;
   }
 
@@ -236,11 +236,45 @@ function autoDetectChart(
     }
   }
 
+  // Check for explicit chart_type hint from backend
+  const hintedType = obj.chart_type as string | undefined;
+
   // Look for data arrays in common response shapes
   const rows = obj.data ?? obj.results ?? obj.rows;
 
   if (!Array.isArray(rows) || rows.length === 0) {
     return null;
+  }
+
+  // Check if this looks like tabular data (many columns, structured rows)
+  // Render as table if: 4+ columns, or has non-numeric columns besides the label
+  if (isTabularData(rows)) {
+    const firstRow = rows[0] as Record<string, unknown>;
+    const keys = Object.keys(firstRow);
+
+    // If it has location_name, category_name etc - it's a breakdown, render as table
+    const hasNameColumns = keys.some(k => /name|location|category|product|employee/i.test(k));
+    const hasMultipleMetrics = keys.filter(k => /revenue|orders|qty|count|amount|total|avg/i.test(k)).length >= 2;
+
+    if (hasNameColumns && hasMultipleMetrics) {
+      const { headers, rows: tableRows } = objectsToTable(rows as Record<string, unknown>[]);
+      const period = obj.period as Record<string, unknown> | undefined;
+      let title = fallbackTitle || '';
+      if (period?.type) {
+        const periodType = String(period.type).replace(/_/g, ' ');
+        title = periodType.charAt(0).toUpperCase() + periodType.slice(1);
+      }
+      if (obj.query_type === 'by_location') {
+        title = title ? `${title} by Location` : 'Revenue by Location';
+      }
+
+      return {
+        type: 'table',
+        title,
+        headers,
+        rows: tableRows,
+      } as ChartData;
+    }
   }
 
   const firstRow = rows[0] as Record<string, unknown>;
@@ -269,7 +303,10 @@ function autoDetectChart(
   const isCurrency = /revenue|sales|amount|total(?!_count)/i.test(valueKey);
 
   // Convert to chart data
-  const chartData = rows.slice(0, 10).map((row) => {
+  // For time series (line charts), keep all data points; for others, limit to 15
+  const isTimeSeries = /^date$|_date$|^day$|^week$|^month$/i.test(labelKey);
+  const maxItems = isTimeSeries ? 100 : 15;
+  const chartData = rows.slice(0, maxItems).map((row) => {
     const r = row as Record<string, unknown>;
     return {
       label: String(r[labelKey] ?? '').slice(0, 20),
@@ -277,28 +314,71 @@ function autoDetectChart(
     };
   });
 
-  // Generate title from key name or fallback
-  const prettyTitle =
-    fallbackTitle ??
-    valueKey
+  // Generate title based on query_type or key name
+  let prettyTitle = fallbackTitle || '';
+  const queryType = obj.query_type as string | undefined;
+  const period = obj.period as Record<string, unknown> | undefined;
+
+  if (queryType === 'trend') {
+    prettyTitle = 'Revenue Trend';
+    if (period?.start && period?.end) {
+      prettyTitle += ` (${period.start} to ${period.end})`;
+    }
+  } else if (queryType === 'by_location') {
+    prettyTitle = 'Revenue by Location';
+  } else if (queryType === 'by_category') {
+    prettyTitle = 'Revenue by Category';
+  } else if (queryType === 'by_product') {
+    prettyTitle = 'Top Products';
+  } else if (!prettyTitle) {
+    prettyTitle = valueKey
       .replace(/_/g, ' ')
       .replace(/\b\w/g, (c) => c.toUpperCase());
-
-  // Determine chart type based on label key
-  if (/date|day|week|month/i.test(labelKey)) {
-    return {
-      type: 'line',
-      title: prettyTitle,
-      data: chartData,
-    };
   }
 
+  // Determine chart type based on data characteristics
+  const chartType = detectChartType(labelKey, valueKey, chartData.length, isCurrency, hintedType);
+
   return {
-    type: 'bar',
+    type: chartType,
     title: prettyTitle,
     data: chartData,
     isCurrency,
   };
+}
+
+/**
+ * Detect best chart type based on data characteristics.
+ */
+function detectChartType(
+  labelKey: string,
+  _valueKey: string,
+  dataLength: number,
+  _isCurrency: boolean,
+  hintedType?: string
+): 'bar' | 'line' | 'donut' | 'pie' {
+  // If backend provided explicit chart_type hint, use it
+  if (hintedType && ['bar', 'line', 'donut', 'pie'].includes(hintedType)) {
+    return hintedType as 'bar' | 'line' | 'donut' | 'pie';
+  }
+
+  const lk = labelKey.toLowerCase();
+
+  // Line chart for time series (date in label key)
+  if (/^date$|_date$|^day$|^week$|^month$/.test(lk)) {
+    return 'line';
+  }
+
+  // Donut chart for category breakdowns with small number of items
+  // Good for: categories, types, segments, groups (2-6 items)
+  if (dataLength >= 2 && dataLength <= 6) {
+    if (/category|type|segment|group|kind|class|brand|vendor|supplier/i.test(lk)) {
+      return 'donut';
+    }
+  }
+
+  // Default to bar chart - it's the most versatile
+  return 'bar';
 }
 
 /**

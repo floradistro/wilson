@@ -142,6 +142,8 @@ export function useChat() {
     // Loop tracking from backend (passed back on continuation)
     toolCallCount?: number;
     loopDepth?: number;
+    // Session-level tool history for loop detection (persists across iterations)
+    sessionToolHistory?: string[];
   }) {
     const {
       userMessage,
@@ -154,12 +156,43 @@ export function useChat() {
       depth,
       toolCallCount,
       loopDepth,
+      sessionToolHistory = [],
     } = params;
 
-    // Claude Code has NO hardcoded iteration limit - bounded only by context window
-    // We keep a very high safety limit just to prevent infinite loops from bugs
-    if (depth > 500) {
-      setError('Safety limit reached (500 iterations). Use /clear to reset.');
+    // LOOP DETECTION: Use session-level tool history (persists across iterations)
+    // sessionToolHistory contains "toolName:paramHash" strings to detect same calls
+    const recentCalls = sessionToolHistory.slice(-15);
+
+    // Check for exact duplicate calls (same tool + same params) - 3 identical = loop
+    if (recentCalls.length >= 3) {
+      const last3 = recentCalls.slice(-3);
+      if (last3[0] === last3[1] && last3[1] === last3[2]) {
+        const toolName = last3[0].split(':')[0];
+        setError(`Loop detected: ${toolName} called 3 times with same parameters. Use /clear to reset.`);
+        updateLastMessage({ isStreaming: false });
+        return;
+      }
+    }
+
+    // Check for excessive calls to same tool (even with different params) - 6+ = likely loop
+    const toolNameCounts = recentCalls.reduce((acc, call) => {
+      const name = call.split(':')[0];
+      acc[name] = (acc[name] || 0) + 1;
+      return acc;
+    }, {} as Record<string, number>);
+
+    const maxToolCalls = Math.max(...Object.values(toolNameCounts), 0);
+    if (maxToolCalls >= 6) {
+      const problematicTool = Object.entries(toolNameCounts).find(([_, count]) => count >= 6)?.[0];
+      setError(`Loop detected: ${problematicTool} called ${maxToolCalls} times. Use /clear to reset.`);
+      updateLastMessage({ isStreaming: false });
+      return;
+    }
+
+    // Safety limit - reduced from 500 to 50 for faster loop detection
+    if (depth > 50) {
+      setError('Maximum tool iterations reached (50). Use /clear to reset.');
+      updateLastMessage({ isStreaming: false });
       return;
     }
 
@@ -192,6 +225,8 @@ export function useChat() {
     let backendLoopDepth: number | undefined = undefined;
     // Structured data from tool results (for rendering charts/tables)
     const toolDataResults: ToolData[] = [];
+    // Tools being streamed (for immediate UI feedback before tools_pending)
+    const streamingTools: ToolCall[] = [];
 
     // Throttled update for streaming text (50ms) - balance between smoothness and responsiveness
     // Lower values = more responsive but more CPU, higher = smoother but laggy feel
@@ -207,22 +242,34 @@ export function useChat() {
           if (event.text) {
             iterationText += event.text;
             charCount += event.text.length;
-            // Throttled updates to reduce render frequency
-            const displayText = accumulatedContent
-              ? accumulatedContent + '\n\n' + iterationText
-              : iterationText;
-            throttledUpdate(displayText, charCount);
+            // Only show current iteration's text - don't accumulate
+            throttledUpdate(iterationText, charCount);
           }
           break;
 
         case 'tool':
-          // Skip individual tool events - we get complete tool info from tools_pending
-          // This avoids duplicates with missing names
+          // Tool events are now for UI feedback only - the complete tool info
+          // comes in tools_pending when stop_reason is 'tool_use'
+          // We still show them as running for immediate feedback
+          if (event.tool && event.tool.name) {
+            // Collect streaming tools for display
+            streamingTools.push({
+              id: event.tool.id,
+              name: event.tool.name,
+              input: event.tool.input,
+              status: 'running' as const,
+            });
+            updateLastMessage({
+              content: iterationText,
+              toolCalls: [...accumulatedTools, ...streamingTools],
+            });
+          }
           break;
 
         case 'tool_result':
           // Capture structured data from backend tool execution
           // This is the KEY event for rendering charts/tables from real data
+          // NOTE: Don't update message here - wait until end to avoid duplicate renders
           if (event.toolResult) {
             toolDataResults.push({
               toolName: event.toolResult.name,
@@ -231,7 +278,6 @@ export function useChat() {
               elapsed_ms: event.toolResult.elapsed_ms,
               isError: event.toolResult.isError,
             });
-            updateLastMessage({ toolData: [...toolDataResults] });
           }
           break;
 
@@ -273,17 +319,9 @@ export function useChat() {
       }
     }
 
-    // Final flush of any pending throttled updates
-    const finalDisplayText = accumulatedContent
-      ? accumulatedContent + '\n\n' + iterationText
-      : iterationText;
+    // Final flush of any pending throttled updates - only show this iteration's text
     setStreamingChars(charCount);
-    updateLastMessage({ content: finalDisplayText });
-
-    // Calculate new accumulated state
-    const newAccumulatedContent = accumulatedContent
-      ? accumulatedContent + '\n\n' + iterationText
-      : iterationText;
+    updateLastMessage({ content: iterationText });
 
     // Execute pending tools if any
     if (pendingTools && pendingTools.length > 0) {
@@ -299,7 +337,7 @@ export function useChat() {
 
       const allToolsSoFar = [...accumulatedTools, ...runningTools];
       updateLastMessage({
-        content: newAccumulatedContent,
+        content: iterationText,
         toolCalls: allToolsSoFar,
       });
 
@@ -310,6 +348,28 @@ export function useChat() {
         onPermissionRequest: callbacks?.onPermissionRequest,
         skipPermissions: callbacks?.skipPermissions,
       });
+
+      // Capture tool results for chart rendering (client-executed tools)
+      // This fills toolDataResults for MCP tools since backend doesn't send tool_result events for them
+      for (const tool of pendingTools) {
+        const result = results.find(r => r.tool_use_id === tool.id);
+        if (result) {
+          try {
+            const parsed = JSON.parse(result.content);
+            // Only add if not already captured from backend
+            if (!toolDataResults.some(td => td.toolId === tool.id)) {
+              toolDataResults.push({
+                toolName: tool.name,
+                toolId: tool.id,
+                data: parsed,
+                isError: !parsed.success,
+              });
+            }
+          } catch {
+            // Skip if not valid JSON
+          }
+        }
+      }
 
       // Mark tools as completed
       const completedTools: ToolCall[] = runningTools.map(tc => {
@@ -330,9 +390,14 @@ export function useChat() {
       });
 
       const newAccumulatedTools = [...accumulatedTools, ...completedTools];
+
+      // Finalize current message with tools (mark as not streaming)
+      // Include toolData from backend tool results even when we have local tools
       updateLastMessage({
-        content: newAccumulatedContent,
+        content: iterationText,
         toolCalls: newAccumulatedTools,
+        toolData: toolDataResults.length > 0 ? toolDataResults : undefined,
+        isStreaming: false,
       });
 
       // Build updated conversation history with the tool interaction
@@ -354,23 +419,45 @@ export function useChat() {
       }));
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
 
+      // Create a NEW assistant message for the next iteration
+      const nextAssistantMessage: Message = {
+        id: crypto.randomUUID(),
+        role: 'assistant',
+        content: '',
+        toolCalls: [],
+        timestamp: new Date(),
+        isStreaming: true,
+      };
+      setMessages(prev => [...prev, nextAssistantMessage]);
+
       // Continue agent loop with accumulated conversation
+      // Update session tool history with "toolName:inputHash" for smarter loop detection
+      // This allows same tool with different params (e.g., analytics with different query_type)
+      const newToolEntries = completedTools.map(t => {
+        // Create a simple hash of key parameters to detect duplicate calls
+        const inputStr = JSON.stringify(t.input || {});
+        const hash = inputStr.length > 50 ? inputStr.slice(0, 50) : inputStr;
+        return `${t.name}:${hash}`;
+      });
+      const updatedSessionToolHistory = [...sessionToolHistory, ...newToolEntries];
+
       await runAgentLoop({
         userMessage,
         conversationHistory: updatedHistory,
         accessToken,
         storeId,
         callbacks,
-        accumulatedContent: newAccumulatedContent,
-        accumulatedTools: newAccumulatedTools,
+        accumulatedContent: '',
+        accumulatedTools: [], // Reset tools for new message
         depth: depth + 1,
         toolCallCount: backendToolCallCount,
         loopDepth: backendLoopDepth,
+        sessionToolHistory: updatedSessionToolHistory,
       });
     } else {
       // No tools - finalize message
       updateLastMessage({
-        content: newAccumulatedContent,
+        content: iterationText,
         toolCalls: accumulatedTools,
         toolData: toolDataResults.length > 0 ? toolDataResults : undefined,
         isStreaming: false,

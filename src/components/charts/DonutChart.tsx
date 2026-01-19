@@ -1,5 +1,6 @@
-import { Box, Text, useStdout } from 'ink';
-import { formatNumber } from '../../utils/format.js';
+import { Box, Text } from 'ink';
+import { BarChart as InkBarChart } from '@pppp606/ink-chart';
+import { COLORS } from '../../theme/colors.js';
 
 interface DataPoint {
   label: string;
@@ -13,74 +14,75 @@ interface DonutChartProps {
   maxSlices?: number;
 }
 
-// Color palette for donut segments (Ink color names)
-const COLORS = ['magenta', 'cyan', 'green', 'yellow', 'blue'] as const;
+// Format number for display
+function fmt(v: number, isCurrency?: boolean): string {
+  if (isCurrency) {
+    if (v >= 1000000) return '$' + (v / 1000000).toFixed(1) + 'M';
+    if (v >= 1000) return '$' + (v / 1000).toFixed(1) + 'k';
+    return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+  if (v >= 1000000) return (v / 1000000).toFixed(1) + 'M';
+  if (v >= 1000) return (v / 1000).toFixed(1) + 'k';
+  return v.toLocaleString('en-US', { maximumFractionDigits: 0 });
+}
 
 /**
- * Terminal-based donut/pie chart.
- * Displays proportional breakdown with colored bars.
+ * Donut/pie chart - uses bar chart with percentages
  */
 export function DonutChart({
   title,
   data,
   isCurrency = false,
-  maxSlices = 5,
+  maxSlices = 8,
 }: DonutChartProps) {
-  const { stdout } = useStdout();
-  const termWidth = stdout?.columns || 80;
-
-  if (!data || data.length === 0) {
-    return <Text dimColor>No data</Text>;
-  }
+  if (!data || data.length === 0) return null;
 
   const total = data.reduce((sum, d) => sum + d.value, 0);
-  const labelWidth = Math.min(Math.max(...data.map((d) => d.label.length), 12), 16);
-  const displayData = data.slice(0, maxSlices);
-  const dividerWidth = Math.max(20, Math.min(termWidth - 10, 50));
+  const displayData = data.slice(0, maxSlices).map(d => ({
+    label: d.label.slice(0, 16),
+    value: d.value,
+  }));
+
+  const dividerChar = '─';
+  const dividerWidth = 50;
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" gap={0}>
+      {/* Title */}
       {title && (
-        <>
-          <Text bold color="white">{title}</Text>
-          <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
-        </>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold color={COLORS.info}>{title}</Text>
+          <Text color={COLORS.border}>{dividerChar.repeat(dividerWidth)}</Text>
+        </Box>
       )}
 
-      {displayData.map(({ label, value }, index) => {
-        const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-        const barLength = Math.round(pct / 4); // Max ~25 chars for 100%
-        const displayLabel = label.length > labelWidth
-          ? label.slice(0, labelWidth - 1) + '…'
-          : label.padEnd(labelWidth);
-        const color = COLORS[index % COLORS.length];
+      {/* Bar Chart (used as category breakdown) */}
+      <InkBarChart
+        data={displayData}
+        showValue="right"
+        sort="desc"
+        width="full"
+      />
 
-        return (
-          <Box key={label}>
-            <Text color="white">{displayLabel}</Text>
-            <Text> </Text>
-            <Text color={color}>{'█'.repeat(barLength).padEnd(25)}</Text>
-            <Text> </Text>
-            <Text color="green">{formatNumber(value, isCurrency)}</Text>
-            <Text dimColor> ({pct}%)</Text>
-          </Box>
-        );
-      })}
-
-      {/* Show remaining count if truncated */}
       {data.length > maxSlices && (
-        <Text dimColor>  +{data.length - maxSlices} more</Text>
+        <Text color={COLORS.textDim}>  +{data.length - maxSlices} more</Text>
       )}
 
-      <Text dimColor>{'─'.repeat(dividerWidth)}</Text>
-
-      {/* Total row */}
-      <Box>
-        <Text bold>{'Total'.padEnd(labelWidth)}</Text>
-        <Text> </Text>
-        <Text>{' '.repeat(25)}</Text>
-        <Text> </Text>
-        <Text bold color="green">{formatNumber(total, isCurrency)}</Text>
+      {/* Footer stats */}
+      <Box marginTop={1}>
+        <Text color={COLORS.border}>{dividerChar.repeat(dividerWidth)}</Text>
+      </Box>
+      <Box gap={2}>
+        <Box>
+          <Text color={COLORS.textMuted}>Total: </Text>
+          <Text bold color={COLORS.success}>{fmt(total, isCurrency)}</Text>
+        </Box>
+        <Box>
+          <Text color={COLORS.textDim}>│</Text>
+        </Box>
+        <Box>
+          <Text color={COLORS.textMuted}>{data.length} categories</Text>
+        </Box>
       </Box>
     </Box>
   );

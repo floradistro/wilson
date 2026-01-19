@@ -5,7 +5,9 @@ import { getToolSchemas } from '../tools/index.js';
 import { getMcpClient } from './mcp.js';
 import { processHistoryForApi, getContextManagementConfig } from '../utils/context-manager.js';
 import { buildSystemPrompt, loadSettings } from '../lib/config-loader.js';
+import { loadProviderSettings } from './storage.js';
 import type { StoreInfo, ToolSchema } from '../types.js';
+import type { AIProvider } from '../providers/types.js';
 
 // =============================================================================
 // API Client
@@ -20,6 +22,9 @@ interface SendChatOptions {
   // Loop tracking from backend - must send back on continuation
   toolCallCount?: number;
   loopDepth?: number;
+  // AI Provider selection
+  provider?: AIProvider;
+  model?: string;
 }
 
 const API_TIMEOUT = 120000; // 2 minute timeout for API calls
@@ -32,7 +37,14 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     storeId,
     toolCallCount,
     loopDepth,
+    provider: optionsProvider,
+    model: optionsModel,
   } = options;
+
+  // Get provider/model from options or saved settings
+  const providerSettings = loadProviderSettings();
+  const provider = optionsProvider || providerSettings.provider;
+  const model = optionsModel || providerSettings.model;
 
   // Load settings and build system prompt (Anthropic pattern)
   const settings = loadSettings();
@@ -41,8 +53,8 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   // Read project context if available (legacy - now handled by buildSystemPrompt)
   const projectContext = getProjectContext();
 
-  // Only send local tools - backend already has MCP tools
-  const localTools = getToolSchemas();
+  // Send ALL tools (local + MCP) to the AI
+  const allTools = getAllToolSchemas();
 
   // Process history to truncate large tool inputs/outputs (client-side optimization)
   const processedHistory = processHistoryForApi(conversationHistory);
@@ -59,16 +71,57 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     platform: process.platform,
     client: 'cli',
     format_hint: 'terminal',
-    local_tools: localTools,
+    local_tools: allTools,
     // Loop tracking - backend uses these to enforce limits
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,
     project_context: projectContext,
     // Server-side context management (safety net for token overflow)
     context_management: contextManagement,
-    // System prompt built from hierarchical config (Anthropic pattern)
-    // Rules are injected BEFORE generation, not post-processed
-    style_instructions: systemPrompt,
+    // AI Provider selection
+    provider,
+    model,
+    // Style instructions for terminal CLI output
+    style_instructions: `Terminal CLI. STRICT RULES:
+
+## FORBIDDEN - NEVER DO THESE:
+- NO ** bold markers anywhere
+- NO emojis
+- NO ASCII art charts (no ████ bars, no drawing charts in text)
+- NO describing what charts look like
+- NO "here's a bar chart showing..."
+- NO React/Recharts/visualization code
+- NO markdown tables (| col | col |) - the UI renders tables automatically from tool data
+- NO repeating data in text that's already shown in charts/tables
+- NEVER use creation_save, creation_edit, generate_chart, or any "creation" tools
+- NEVER use chart/dashboard/visualization generation tools
+- NEVER use Database_query or Database_schema for revenue, sales, or analytics - use the Analytics tool instead
+- NEVER query orders, transactions, or events tables directly - the Analytics tool uses pre-aggregated data
+
+## CHARTS & TABLES - AUTOMATIC RENDERING:
+Charts and tables render AUTOMATICALLY from tool data. You do NOT create them.
+After calling a tool, the data appears as a beautifully formatted chart or table.
+DO NOT repeat the data in text - just provide brief insights (1-3 sentences).
+
+Analytics tool query_type options - EACH GIVES DIFFERENT VISUALIZATION:
+- "summary" → KPI metrics card (totals, averages)
+- "trend" → line chart showing daily revenue over time
+- "by_location" → table showing breakdown by store location
+
+CRITICAL FOR MULTIPLE VIEWS: To show different data dynamics, call Analytics with DIFFERENT query_types IN ONE RESPONSE:
+- Call 1: query_type="summary" for KPIs
+- Call 2: query_type="trend" for time series chart
+- Call 3: query_type="by_location" for location breakdown
+
+NEVER call the same query_type twice - each query_type shows unique data.
+
+## TEXT FORMAT:
+- Plain text only
+- Code in \`\`\` fences
+- Simple bullet lists with -
+- No decorations
+
+${systemPrompt}`,
   };
 
   // Create abort controller for timeout
@@ -240,21 +293,46 @@ export async function prefetchMcpTools(): Promise<void> {
 function getAllToolSchemas(): ToolSchema[] {
   const localTools = getToolSchemas();
 
+  // First dedupe local tools (in case there are duplicates)
+  const seenNames = new Set<string>();
+  const dedupedLocal: ToolSchema[] = [];
+  for (const tool of localTools) {
+    const name = tool.name.toLowerCase();
+    if (seenNames.has(name)) {
+      console.error(`[DEBUG] Duplicate local tool: ${tool.name}`);
+    } else {
+      seenNames.add(name);
+      dedupedLocal.push(tool);
+    }
+  }
+
   // Return cached MCP tools if available
   if (cachedMcpTools) {
-    // Deduplicate by name - local tools take priority, then first occurrence of MCP tools
-    const seenNames = new Set(localTools.map(t => t.name));
+    // Deduplicate by name (case-insensitive) - local tools take priority
     const uniqueMcpTools: ToolSchema[] = [];
     for (const tool of cachedMcpTools) {
-      if (!seenNames.has(tool.name)) {
-        seenNames.add(tool.name);
+      const name = tool.name.toLowerCase();
+      if (seenNames.has(name)) {
+        console.error(`[DEBUG] Duplicate MCP tool (skipping): ${tool.name}`);
+      } else {
+        seenNames.add(name);
         uniqueMcpTools.push(tool);
       }
     }
-    return [...localTools, ...uniqueMcpTools];
+
+    const result = [...dedupedLocal, ...uniqueMcpTools];
+
+    // Final verification - check for any remaining duplicates
+    const finalNames = result.map(t => t.name.toLowerCase());
+    const finalDupes = finalNames.filter((name, i) => finalNames.indexOf(name) !== i);
+    if (finalDupes.length > 0) {
+      console.error(`[DEBUG] FINAL DUPLICATES FOUND: ${finalDupes.join(', ')}`);
+    }
+
+    return result;
   }
 
-  return localTools;
+  return dedupedLocal;
 }
 
 function getProjectContext(): string | undefined {
