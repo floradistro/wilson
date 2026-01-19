@@ -30,6 +30,9 @@ export const IndexSchema = {
   },
 };
 
+// Timeout for index building (10 seconds)
+const INDEX_TIMEOUT = 10000;
+
 export const indexTool: Tool = {
   schema: IndexSchema,
 
@@ -40,11 +43,27 @@ export const indexTool: Tool = {
     try {
       const logs: string[] = [];
 
-      cachedIndex = await buildIndex(path, {
-        includeSemantics: true,
+      // Build index with timeout to prevent hangs
+      const indexPromise = buildIndex(path, {
+        includeSemantics: false, // Disabled - too slow and causes hangs
         forceRebuild: force,
         onProgress: (msg) => logs.push(msg),
       });
+
+      const timeoutPromise = new Promise<null>((resolve) =>
+        setTimeout(() => resolve(null), INDEX_TIMEOUT)
+      );
+
+      const result = await Promise.race([indexPromise, timeoutPromise]);
+
+      if (!result) {
+        return {
+          success: false,
+          error: `Index timed out after ${INDEX_TIMEOUT / 1000}s. Project may be too large or have complex files.`,
+        };
+      }
+
+      cachedIndex = result;
       cachedRoot = path;
 
       return {
@@ -52,9 +71,8 @@ export const indexTool: Tool = {
         content: [
           `Indexed ${cachedIndex.stats.fileCount} files`,
           `Found ${cachedIndex.stats.symbolCount} symbols`,
-          `Created ${cachedIndex.stats.chunkCount} semantic chunks`,
           '',
-          ...logs,
+          ...logs.slice(-5), // Only last 5 log lines
         ].join('\n'),
       };
     } catch (error) {

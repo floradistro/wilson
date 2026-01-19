@@ -9,7 +9,7 @@ import { useEffect, useCallback, useSyncExternalStore } from 'react';
 import { authStore, type AuthStoreState } from '../stores/authStore.js';
 import { bootstrapWilson } from '../services/bootstrap.js';
 import { createMcpClient, cleanupMcp } from '../services/mcp.js';
-import { prefetchMcpTools } from '../services/api.js';
+import { prefetchMcpTools, prebuildCodebaseIndex } from '../services/api.js';
 import { fetchMenuConfig, clearMenuCache } from '../services/menu.js';
 import type { StoreInfo, LocationInfo } from '../types.js';
 
@@ -118,6 +118,11 @@ export function useAuthStore(): UseAuthStoreReturn {
   // Refresh stores/locations
   const refreshStores = useCallback(async (): Promise<void> => {
     await authStore.refreshStoresAndLocations();
+  }, []);
+
+  // Pre-build codebase index on mount (runs once, regardless of auth)
+  useEffect(() => {
+    prebuildCodebaseIndex().catch(() => {});
   }, []);
 
   // Bootstrap and initialize MCP on mount if already authenticated

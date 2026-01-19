@@ -28,10 +28,15 @@ import { debugTools } from './debug.js';
 // Workflow & tool chaining
 import { workflowTools, WorkflowSchema } from './workflow.js';
 // Core infrastructure (hooks, task manager)
-import { setupDefaultHooks, runPreHooks, runPostHooks, analyzeError } from './core/hooks.js';
+import { setupDefaultHooks, runPreHooks, runPostHooks, analyzeError, setIndexInvalidationCallback } from './core/hooks.js';
+// Index invalidation
+import { invalidateCodebaseIndex } from '../services/api.js';
 
 // Initialize default hooks on module load
 setupDefaultHooks();
+
+// Wire up index invalidation callback
+setIndexInvalidationCallback(invalidateCodebaseIndex);
 
 // =============================================================================
 // Tool Registry

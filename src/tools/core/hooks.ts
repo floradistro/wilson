@@ -261,6 +261,23 @@ export function getRecentCorrections(toolName?: string, limit = 10): CorrectionA
 }
 
 // =============================================================================
+// Index Invalidation Callback
+// =============================================================================
+
+// Callback to invalidate codebase index when files are modified
+let indexInvalidationCallback: (() => void) | null = null;
+
+export function setIndexInvalidationCallback(callback: () => void): void {
+  indexInvalidationCallback = callback;
+}
+
+function invalidateIndexOnFileChange(): void {
+  if (indexInvalidationCallback) {
+    indexInvalidationCallback();
+  }
+}
+
+// =============================================================================
 // Default Hooks Setup
 // =============================================================================
 
@@ -301,6 +318,21 @@ export function setupDefaultHooks(): void {
     }
 
     return { proceed: true };
+  });
+
+  // Invalidate codebase index when files are modified
+  registerPostHook('Edit', async (_context, result) => {
+    if (result.success) {
+      invalidateIndexOnFileChange();
+    }
+    return { result };
+  });
+
+  registerPostHook('Write', async (_context, result) => {
+    if (result.success) {
+      invalidateIndexOnFileChange();
+    }
+    return { result };
   });
 
   // Global error analysis hook

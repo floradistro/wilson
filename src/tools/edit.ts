@@ -16,10 +16,25 @@ export const editTool: Tool = {
   schema: EditSchema,
 
   async execute(params: Record<string, unknown>): Promise<ToolResult> {
+    // Validate parameters are strings
+    const filePath = params.file_path;
+    const oldString = params.old_string;
+    const newString = params.new_string;
+
+    if (typeof filePath !== 'string' || !filePath) {
+      return { success: false, error: 'file_path must be a non-empty string' };
+    }
+    if (typeof oldString !== 'string') {
+      return { success: false, error: `old_string must be a string, got ${typeof oldString}` };
+    }
+    if (typeof newString !== 'string') {
+      return { success: false, error: `new_string must be a string, got ${typeof newString}` };
+    }
+
     const editParams: SmartEditParams = {
-      file_path: params.file_path as string,
-      old_string: params.old_string as string,
-      new_string: params.new_string as string,
+      file_path: filePath,
+      old_string: oldString,
+      new_string: newString,
       replace_all: params.replace_all as boolean | undefined,
       // Enable smart features by default
       fuzzy: true,

@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useStdout } from 'ink';
+import { useState, useEffect, useCallback } from 'react';
 
 export interface TerminalSize {
   width: number;
@@ -17,14 +16,12 @@ const VERY_NARROW_THRESHOLD = 65;
 
 /**
  * Hook to track terminal size changes reactively
- * Returns responsive layout values based on current terminal width
+ * Uses process.stdout directly and forces re-render on resize
  */
 export function useTerminalSize(): TerminalSize {
-  const { stdout } = useStdout();
-
-  const getSize = (): TerminalSize => {
-    const width = stdout?.columns || 80;
-    const height = stdout?.rows || 24;
+  const getSize = useCallback((): TerminalSize => {
+    const width = process.stdout.columns || 80;
+    const height = process.stdout.rows || 24;
 
     // Compute responsive values
     const isVeryNarrow = width < VERY_NARROW_THRESHOLD;
@@ -45,14 +42,18 @@ export function useTerminalSize(): TerminalSize {
       isNarrow,
       isVeryNarrow,
     };
-  };
+  }, []);
 
   const [size, setSize] = useState<TerminalSize>(getSize);
 
   useEffect(() => {
     const handleResize = () => {
+      // Force immediate re-render with new size
       setSize(getSize());
     };
+
+    // Initial size
+    handleResize();
 
     // Listen for terminal resize events
     process.stdout.on('resize', handleResize);
@@ -60,7 +61,7 @@ export function useTerminalSize(): TerminalSize {
     return () => {
       process.stdout.off('resize', handleResize);
     };
-  }, [stdout]);
+  }, [getSize]);
 
   return size;
 }

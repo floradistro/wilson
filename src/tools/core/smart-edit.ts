@@ -237,7 +237,8 @@ function findMatches(content: string, search: string, fuzzy: boolean = false): M
 
   // Find near matches
   const lines = content.split('\n');
-  const searchFirstLine = search.split('\n')[0].trim();
+  const searchLines = search.split('\n');
+  const searchFirstLine = searchLines[0].trim();
   const nearMatches: MatchResult['nearMatches'] = [];
 
   for (let i = 0; i < lines.length; i++) {
@@ -245,15 +246,25 @@ function findMatches(content: string, search: string, fuzzy: boolean = false): M
     const sim = similarity(lineTrimmed, searchFirstLine);
 
     if (sim > 0.6 && lineTrimmed.length > 10) {
-      // Get context around this line
+      // Get the full text that matches the search length (for multi-line edits)
+      const matchEndLine = Math.min(lines.length, i + searchLines.length);
+      const fullMatchText = lines.slice(i, matchEndLine).join('\n');
+
+      // Calculate similarity of full text (not just first line)
+      const fullSim = similarity(
+        normalizeWhitespace(fullMatchText),
+        normalizeWhitespace(search)
+      );
+
+      // Get context around this line for preview
       const contextStart = Math.max(0, i - 1);
-      const contextEnd = Math.min(lines.length, i + search.split('\n').length + 1);
+      const contextEnd = Math.min(lines.length, matchEndLine + 1);
       const preview = lines.slice(contextStart, contextEnd).join('\n');
 
       nearMatches.push({
-        text: lines[i],
+        text: fullMatchText, // Store full matched text, not just first line
         lineNumber: i + 1,
-        similarity: sim,
+        similarity: fullSim, // Use full text similarity
         preview,
       });
     }
@@ -373,8 +384,43 @@ export async function smartEdit(params: SmartEditParams): Promise<ToolResult> {
     const matchResult = findMatches(content, old_string, fuzzy);
 
     if (!matchResult.found) {
-      // Build helpful error message
-      let errorMsg = 'String not found in file.';
+      // Check for high-similarity match (100% = whitespace difference only)
+      // Auto-correct by using the actual text from the file
+      if (matchResult.nearMatches && matchResult.nearMatches.length > 0) {
+        const bestMatch = matchResult.nearMatches[0];
+
+        // If 85%+ similar, auto-correct and perform the edit
+        // This handles whitespace/indentation differences which are very common
+        if (bestMatch.similarity >= 0.85) {
+          const actualOldString = bestMatch.text;
+          const actualIndex = content.indexOf(actualOldString);
+
+          if (actualIndex !== -1) {
+            // Perform the edit with the corrected old_string
+            const newContent = content.slice(0, actualIndex) +
+                              new_string +
+                              content.slice(actualIndex + actualOldString.length);
+
+            writeFileSync(file_path, newContent, 'utf8');
+            recordFileRead(file_path, newContent);
+
+            // Generate diff
+            const { diff, summary } = generateDiff(content, newContent, actualOldString, new_string, file_path);
+
+            return {
+              success: true,
+              message: `Edit applied (auto-corrected whitespace from ${Math.round(bestMatch.similarity * 100)}% match at line ${bestMatch.lineNumber})`,
+              diff,
+              summary,
+              linesChanged: new_string.split('\n').length,
+              autoCorrect: true,
+            };
+          }
+        }
+      }
+
+      // Build helpful error message for lower similarity matches
+      let errorMsg = 'String not found in file.\n\n⚠️ DO NOT RETRY THIS EDIT. The content you are looking for does not exist. Use Read to see the actual file contents.';
 
       if (matchResult.nearMatches && matchResult.nearMatches.length > 0) {
         errorMsg += '\n\n📍 Similar strings found:\n';
@@ -396,8 +442,8 @@ export async function smartEdit(params: SmartEditParams): Promise<ToolResult> {
       return {
         success: false,
         error: errorMsg,
-        errorType: 'recoverable',
-        suggestion: 'Check whitespace, indentation, and exact character matching',
+        is_error: true, // Tell Claude to NOT retry
+        suggestion: 'DO NOT RETRY. Read the file first to see actual contents.',
         nearMatches: matchResult.nearMatches,
       };
     }

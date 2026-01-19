@@ -29,7 +29,9 @@ export const lsTool: Tool = {
       if (!long) {
         return {
           success: true,
-          content: filtered.join('\n'),
+          files: filtered,
+          count: filtered.length,
+          path,
         };
       }
 
@@ -49,7 +51,10 @@ export const lsTool: Tool = {
 
       return {
         success: true,
-        content: detailed.join('\n'),
+        files: detailed,
+        count: detailed.length,
+        path,
+        long: true,
       };
     } catch (error) {
       return {

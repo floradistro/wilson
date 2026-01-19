@@ -485,8 +485,8 @@ async function startServer(
   child.unref();
   servers.set(id, server);
 
-  // Wait for server to be ready (max 30 seconds)
-  await waitForReady(server, 30000);
+  // Wait briefly for server to start (max 5 seconds - don't block too long)
+  await waitForReady(server, 5000);
 
   return server;
 }

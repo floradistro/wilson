@@ -6,8 +6,13 @@ import { getMcpClient } from './mcp.js';
 import { processHistoryForApi, getContextManagementConfig } from '../utils/context-manager.js';
 import { buildSystemPrompt, loadSettings } from '../lib/config-loader.js';
 import { loadProviderSettings } from './storage.js';
+import { loadExistingIndex, buildIndex, type CodebaseIndex } from '../indexer/index.js';
 import type { StoreInfo, ToolSchema } from '../types.js';
 import type { AIProvider } from '../providers/types.js';
+
+// Cache for codebase index
+let cachedCodebaseIndex: CodebaseIndex | null = null;
+let indexedRoot: string | null = null;
 
 // =============================================================================
 // API Client
@@ -53,6 +58,9 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   // Read project context if available (legacy - now handled by buildSystemPrompt)
   const projectContext = getProjectContext();
 
+  // Get codebase index summary (helps Claude understand project structure)
+  const codebaseSummary = getCodebaseSummary();
+
   // Send ALL tools (local + MCP) to the backend
   // This includes file ops, bash, store tools, AND MCP data tools
   const allTools = getAllToolSchemas();
@@ -77,6 +85,8 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,
     project_context: projectContext,
+    // Codebase index summary (helps Claude understand project structure)
+    codebase_summary: codebaseSummary,
     // Server-side context management (safety net for token overflow)
     context_management: contextManagement,
     // AI Provider selection
@@ -280,6 +290,80 @@ export async function refreshAccessToken(
 // Cache MCP tools to avoid blocking on every request
 let cachedMcpTools: ToolSchema[] | null = null;
 
+// Minimum files to index - skip empty/nearly-empty directories
+const MIN_FILES_TO_INDEX = 3;
+// Maximum time to spend indexing (ms)
+const INDEX_TIMEOUT = 10000;
+
+/**
+ * Pre-build codebase index for faster first request. Call at startup.
+ * Non-blocking - runs in background and times out if too slow.
+ */
+export async function prebuildCodebaseIndex(): Promise<void> {
+  const cwd = process.cwd();
+
+  // Skip if already indexed this directory
+  if (cachedCodebaseIndex && indexedRoot === cwd) {
+    return;
+  }
+
+  // Clear stale cache if directory changed
+  if (indexedRoot && indexedRoot !== cwd) {
+    cachedCodebaseIndex = null;
+    indexedRoot = null;
+  }
+
+  // Try to load existing index first (fast)
+  try {
+    const existing = loadExistingIndex(cwd);
+    if (existing && existing.stats.fileCount >= MIN_FILES_TO_INDEX) {
+      cachedCodebaseIndex = existing;
+      indexedRoot = cwd;
+      return;
+    }
+  } catch {
+    // Fall through to build
+  }
+
+  // Build new index with timeout to prevent hangs
+  try {
+    const indexPromise = buildIndex(cwd, { includeSemantics: false });
+    const timeoutPromise = new Promise<null>((resolve) =>
+      setTimeout(() => resolve(null), INDEX_TIMEOUT)
+    );
+
+    const index = await Promise.race([indexPromise, timeoutPromise]);
+
+    if (index && index.stats.fileCount >= MIN_FILES_TO_INDEX) {
+      cachedCodebaseIndex = index;
+      indexedRoot = cwd;
+    }
+  } catch {
+    // Indexing failed, continue without it
+  }
+}
+
+/**
+ * Invalidate the index cache - call when directory changes or files are modified.
+ */
+export function invalidateCodebaseIndex(): void {
+  cachedCodebaseIndex = null;
+  indexedRoot = null;
+}
+
+/**
+ * Refresh index if the working directory changed.
+ * Call this on each request to ensure index is fresh.
+ */
+export function refreshIndexIfNeeded(): void {
+  const cwd = process.cwd();
+  if (indexedRoot && indexedRoot !== cwd) {
+    // Directory changed - invalidate and rebuild in background
+    invalidateCodebaseIndex();
+    prebuildCodebaseIndex().catch(() => {});
+  }
+}
+
 /**
  * Pre-fetch MCP tools into cache. Call this after MCP client is initialized.
  */
@@ -360,4 +444,87 @@ function getProjectContext(): string | undefined {
   }
 
   return undefined;
+}
+
+// Get or build codebase index summary for system prompt
+function getCodebaseSummary(): string | undefined {
+  const cwd = process.cwd();
+
+  // Check if directory changed and refresh if needed
+  refreshIndexIfNeeded();
+
+  // Return cached if same directory and has enough files
+  if (cachedCodebaseIndex && indexedRoot === cwd && cachedCodebaseIndex.stats.fileCount >= MIN_FILES_TO_INDEX) {
+    return formatIndexSummary(cachedCodebaseIndex);
+  }
+
+  // Try to load existing index (fast)
+  try {
+    const existing = loadExistingIndex(cwd);
+    if (existing && existing.stats.fileCount >= MIN_FILES_TO_INDEX) {
+      cachedCodebaseIndex = existing;
+      indexedRoot = cwd;
+      return formatIndexSummary(existing);
+    }
+  } catch {
+    // Indexing failed, continue without it
+  }
+
+  // No index exists or too few files - build one in background for next time
+  // Don't block the request, and use timeout to prevent hangs
+  const indexPromise = buildIndex(cwd, { includeSemantics: false });
+  const timeoutPromise = new Promise<null>((resolve) =>
+    setTimeout(() => resolve(null), INDEX_TIMEOUT)
+  );
+
+  Promise.race([indexPromise, timeoutPromise])
+    .then(index => {
+      if (index && index.stats.fileCount >= MIN_FILES_TO_INDEX) {
+        cachedCodebaseIndex = index;
+        indexedRoot = cwd;
+      }
+    })
+    .catch(() => {
+      // Silently ignore indexing failures
+    });
+
+  return undefined;
+}
+
+function formatIndexSummary(index: CodebaseIndex): string {
+  const { stats, scan, symbols } = index;
+
+  // Group files by directory
+  const dirCounts = new Map<string, number>();
+  for (const file of scan.files) {
+    const dir = file.path.split('/').slice(0, -1).join('/') || '.';
+    dirCounts.set(dir, (dirCounts.get(dir) || 0) + 1);
+  }
+
+  // Top directories
+  const topDirs = [...dirCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([dir, count]) => `  ${dir}/ (${count} files)`)
+    .join('\n');
+
+  // Key symbols (exported functions/classes)
+  const exportedSymbols = symbols
+    .filter(s => s.exported && (s.kind === 'function' || s.kind === 'class'))
+    .slice(0, 20)
+    .map(s => `  ${s.kind}: ${s.name} (${s.file}:${s.line})`)
+    .join('\n');
+
+  return `
+CODEBASE INDEX (auto-generated):
+Files: ${stats.fileCount} | Symbols: ${stats.symbolCount}
+
+Top directories:
+${topDirs}
+
+Key exports:
+${exportedSymbols || '  (none found)'}
+
+Use the Search tool for semantic queries, or Read specific files.
+`.trim();
 }

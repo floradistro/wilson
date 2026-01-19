@@ -191,18 +191,31 @@ function ToolResult({ tool }: { tool: ToolCall }) {
     return <DiffResult diff={r.diff} summary={r.summary as string} width={width} />;
   }
 
-  // File content (Read)
-  if (r.content && typeof r.content === 'string') {
-    const lines = r.content.split('\n');
-    const lineCount = r.lineCount || lines.length;
-    return (
-      <Text color={COLORS.textDim}>       {lineCount} lines</Text>
-    );
+  // File list (Glob, LS)
+  if (r.files && Array.isArray(r.files)) {
+    return <FileListResult files={r.files} width={width} path={r.path as string} isLong={r.long as boolean} />;
   }
 
-  // File list (Glob)
-  if (r.files && Array.isArray(r.files)) {
-    return <FileListResult files={r.files} width={width} />;
+  // File content (Read) - show line count and preview
+  if (r.content && typeof r.content === 'string') {
+    // Check if it's JSON that contains files (legacy glob format)
+    try {
+      const parsed = JSON.parse(r.content);
+      if (parsed.files && Array.isArray(parsed.files)) {
+        return <FileListResult files={parsed.files} width={width} />;
+      }
+    } catch {
+      // Not JSON, treat as file content
+    }
+
+    const lineCount = r.lineCount || r.content.split('\n').length;
+    const totalLines = r.totalLines;
+    const lineInfo = totalLines && totalLines !== lineCount
+      ? `${lineCount} of ${totalLines} lines`
+      : `${lineCount} lines`;
+    return (
+      <Text color={COLORS.textDim}>       {lineInfo}</Text>
+    );
   }
 
   // Bash output
@@ -255,36 +268,40 @@ const DiffResult = memo(function DiffResult({
   // Find max line number for width calculation
   const maxLineNum = Math.max(...show.map(l => l.lineNum || 0), 1);
   const lnWidth = Math.max(3, String(maxLineNum).length);
-  const contentWidth = width - lnWidth - 10;
+  // Leave margin for line number, sign, and some padding
+  const maxContentWidth = Math.max(20, width - lnWidth - 12);
 
   return (
     <Box flexDirection="column" marginLeft={2} gap={0}>
       {/* Summary */}
       {summary && <Text color={COLORS.textMuted}>  {summary}</Text>}
 
-      {/* Diff lines - no gaps */}
+      {/* Diff lines - background only covers actual content, not full width */}
       {show.map((line, i) => {
         const ln = line.lineNum ? String(line.lineNum).padStart(lnWidth) : ' '.repeat(lnWidth);
-        const content = line.content.length > contentWidth
-          ? line.content.slice(0, contentWidth - 4) + '...'
+        // Truncate content if needed, but don't pad
+        const content = line.content.length > maxContentWidth
+          ? line.content.slice(0, maxContentWidth - 3) + '...'
           : line.content;
 
         if (line.type === 'add') {
           return (
-            <Text key={i} backgroundColor="#0d2818" color="#3fb950">
-              {' '}{ln} + {content.padEnd(contentWidth)}{' '}
+            <Text key={i}>
+              <Text color={COLORS.textDim}> {ln} </Text>
+              <Text backgroundColor="#0d2818" color="#3fb950">+{content}</Text>
             </Text>
           );
         } else if (line.type === 'remove') {
           return (
-            <Text key={i} backgroundColor="#2d1216" color="#f85149">
-              {' '}{ln} - {content.padEnd(contentWidth)}{' '}
+            <Text key={i}>
+              <Text color={COLORS.textDim}> {ln} </Text>
+              <Text backgroundColor="#2d1216" color="#f85149">-{content}</Text>
             </Text>
           );
         } else {
           return (
             <Text key={i} color={COLORS.textDim}>
-              {' '}{ln}   {content}
+              {' '}{ln}  {content}
             </Text>
           );
         }
@@ -301,10 +318,12 @@ const DiffResult = memo(function DiffResult({
 // ============================================================================
 
 const FileListResult = memo(function FileListResult({
-  files, width
+  files, width, path, isLong
 }: {
   files: string[];
   width: number;
+  path?: string;
+  isLong?: boolean;
 }) {
   if (files.length === 0) {
     return (
@@ -312,12 +331,65 @@ const FileListResult = memo(function FileListResult({
     );
   }
 
-  const show = files.slice(0, 8);
+  // Show more files for directory listings (they're usually shorter)
+  const maxShow = isLong ? 12 : 10;
+  const show = files.slice(0, maxShow);
   const hidden = files.length - show.length;
 
+  // For long format, files already include details - just show them
+  if (isLong) {
+    return (
+      <Box flexDirection="column" gap={0}>
+        <Text color={COLORS.textDim}>       {files.length} items</Text>
+        {show.map((file, i) => (
+          <Text key={i} color={COLORS.textVeryDim}>
+            {'         '}{file.length > width - 12 ? file.slice(0, width - 15) + '...' : file}
+          </Text>
+        ))}
+        {hidden > 0 && (
+          <Text color={COLORS.textVeryDim}>
+            {'         '}+{hidden} more
+          </Text>
+        )}
+      </Box>
+    );
+  }
+
+  // For simple listings, show files in a compact grid-like format if short
+  const avgLen = files.reduce((s, f) => s + f.length, 0) / files.length;
+  const useCompact = avgLen < 25 && files.length <= 20;
+
+  if (useCompact && files.length > 1) {
+    // Compact: show multiple per line
+    const cols = Math.floor((width - 10) / 30) || 1;
+    const rows: string[][] = [];
+    for (let i = 0; i < files.length; i += cols) {
+      rows.push(files.slice(i, i + cols));
+    }
+    const showRows = rows.slice(0, 6);
+    const hiddenCount = files.length - showRows.flat().length;
+
+    return (
+      <Box flexDirection="column" gap={0}>
+        <Text color={COLORS.textDim}>       {files.length} items</Text>
+        {showRows.map((row, i) => (
+          <Text key={i} color={COLORS.textVeryDim}>
+            {'         '}{row.map(f => f.padEnd(28)).join(' ')}
+          </Text>
+        ))}
+        {hiddenCount > 0 && (
+          <Text color={COLORS.textVeryDim}>
+            {'         '}+{hiddenCount} more
+          </Text>
+        )}
+      </Box>
+    );
+  }
+
+  // Standard: one per line
   return (
     <Box flexDirection="column" gap={0}>
-      <Text color={COLORS.textDim}>       {files.length} files</Text>
+      <Text color={COLORS.textDim}>       {files.length} {files.length === 1 ? 'item' : 'items'}</Text>
       {show.map((file, i) => (
         <Text key={i} color={COLORS.textVeryDim}>
           {'         '}{truncatePath(file, width - 12)}
@@ -342,17 +414,30 @@ const GrepResult = memo(function GrepResult({
   matches: Array<{ file: string; line?: number; content?: string }>;
   width: number;
 }) {
-  const show = matches.slice(0, 8);
+  const show = matches.slice(0, 10);
   const hidden = matches.length - show.length;
+
+  // Calculate how much space for content preview
+  const pathWidth = Math.min(40, width / 2);
+  const contentWidth = width - pathWidth - 15;
 
   return (
     <Box flexDirection="column" gap={0}>
-      <Text color={COLORS.textDim}>       {matches.length} matches</Text>
-      {show.map((m, i) => (
-        <Text key={i} color={COLORS.textVeryDim}>
-          {'         '}{truncatePath(m.file, width - 12)}{m.line ? `:${m.line}` : ''}
-        </Text>
-      ))}
+      <Text color={COLORS.textDim}>       {matches.length} {matches.length === 1 ? 'match' : 'matches'}</Text>
+      {show.map((m, i) => {
+        const filePart = truncatePath(m.file, pathWidth - 5);
+        const linePart = m.line ? `:${m.line}` : '';
+        const contentPart = m.content
+          ? ` ${m.content.trim().slice(0, contentWidth)}`
+          : '';
+        return (
+          <Text key={i}>
+            <Text color={COLORS.textVeryDim}>{'         '}</Text>
+            <Text color={COLORS.textMuted}>{filePart}{linePart}</Text>
+            <Text color={COLORS.textVeryDim}>{contentPart}</Text>
+          </Text>
+        );
+      })}
       {hidden > 0 && (
         <Text color={COLORS.textVeryDim}>
           {'         '}+{hidden} more

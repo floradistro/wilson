@@ -118,74 +118,359 @@ const CodeBlock = memo(function CodeBlock({
   );
 });
 
-// Simple syntax highlighting
-function highlightLine(line: string, lang?: string): JSX.Element {
-  if (!lang) return <>{line}</>;
+// =============================================================================
+// Advanced Syntax Highlighting
+// =============================================================================
 
-  // Keywords for common languages
-  const keywords = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
-    'import', 'export', 'from', 'class', 'extends', 'new', 'this', 'async', 'await',
-    'try', 'catch', 'throw', 'default', 'switch', 'case', 'break', 'continue',
-    'true', 'false', 'null', 'undefined', 'typeof', 'instanceof'];
+// Language-specific keyword sets
+const LANG_KEYWORDS: Record<string, Set<string>> = {
+  javascript: new Set([
+    'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'do',
+    'import', 'export', 'from', 'as', 'default', 'class', 'extends', 'new', 'this',
+    'async', 'await', 'try', 'catch', 'finally', 'throw', 'switch', 'case', 'break',
+    'continue', 'typeof', 'instanceof', 'in', 'of', 'yield', 'static', 'get', 'set',
+    'super', 'with', 'debugger', 'delete', 'void',
+  ]),
+  typescript: new Set([
+    'const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'do',
+    'import', 'export', 'from', 'as', 'default', 'class', 'extends', 'new', 'this',
+    'async', 'await', 'try', 'catch', 'finally', 'throw', 'switch', 'case', 'break',
+    'continue', 'typeof', 'instanceof', 'in', 'of', 'yield', 'static', 'get', 'set',
+    'super', 'with', 'debugger', 'delete', 'void',
+    'type', 'interface', 'enum', 'namespace', 'module', 'declare', 'implements',
+    'public', 'private', 'protected', 'readonly', 'abstract', 'override', 'keyof',
+    'infer', 'satisfies', 'is', 'asserts',
+  ]),
+  python: new Set([
+    'def', 'class', 'return', 'if', 'elif', 'else', 'for', 'while', 'try', 'except',
+    'finally', 'with', 'as', 'import', 'from', 'raise', 'pass', 'break', 'continue',
+    'lambda', 'yield', 'global', 'nonlocal', 'assert', 'del', 'in', 'not', 'and', 'or',
+    'is', 'async', 'await', 'match', 'case',
+  ]),
+  rust: new Set([
+    'fn', 'let', 'mut', 'const', 'static', 'if', 'else', 'match', 'for', 'while', 'loop',
+    'return', 'break', 'continue', 'struct', 'enum', 'impl', 'trait', 'type', 'where',
+    'pub', 'mod', 'use', 'as', 'self', 'super', 'crate', 'unsafe', 'async', 'await',
+    'move', 'ref', 'dyn', 'box',
+  ]),
+  go: new Set([
+    'func', 'var', 'const', 'type', 'struct', 'interface', 'map', 'chan', 'if', 'else',
+    'for', 'range', 'switch', 'case', 'default', 'select', 'return', 'break', 'continue',
+    'goto', 'fallthrough', 'defer', 'go', 'package', 'import',
+  ]),
+  sql: new Set([
+    'select', 'from', 'where', 'and', 'or', 'not', 'in', 'like', 'between', 'is', 'null',
+    'order', 'by', 'asc', 'desc', 'limit', 'offset', 'group', 'having', 'join', 'left',
+    'right', 'inner', 'outer', 'on', 'as', 'union', 'insert', 'into', 'values', 'update',
+    'set', 'delete', 'create', 'table', 'index', 'drop', 'alter', 'add', 'column',
+    'primary', 'key', 'foreign', 'references', 'constraint', 'unique', 'default', 'check',
+    'case', 'when', 'then', 'else', 'end', 'cast', 'coalesce', 'distinct', 'exists',
+    'count', 'sum', 'avg', 'min', 'max',
+  ]),
+  bash: new Set([
+    'if', 'then', 'else', 'elif', 'fi', 'case', 'esac', 'for', 'while', 'until', 'do',
+    'done', 'in', 'function', 'return', 'local', 'export', 'source', 'alias', 'unset',
+    'readonly', 'declare', 'typeset', 'shift', 'exit', 'break', 'continue', 'trap',
+    'echo', 'printf', 'read', 'cd', 'pwd', 'ls', 'cat', 'grep', 'sed', 'awk', 'find',
+    'xargs', 'sort', 'uniq', 'head', 'tail', 'wc', 'cut', 'tr', 'tee', 'mkdir', 'rm',
+    'cp', 'mv', 'chmod', 'chown', 'curl', 'wget', 'tar', 'gzip', 'git', 'npm', 'node',
+  ]),
+  css: new Set([
+    'important', 'inherit', 'initial', 'unset', 'revert', 'none', 'auto', 'normal',
+  ]),
+  json: new Set([]), // JSON has no keywords, just structure
+  html: new Set([]),
+  xml: new Set([]),
+  yaml: new Set(['true', 'false', 'null', 'yes', 'no', 'on', 'off']),
+  markdown: new Set([]),
+};
 
-  // Simple token-based highlighting
-  const parts: JSX.Element[] = [];
-  let remaining = line;
-  let key = 0;
+// Literals (true, false, null, etc.)
+const LITERALS = new Set([
+  'true', 'false', 'null', 'undefined', 'nil', 'None', 'True', 'False',
+  'NaN', 'Infinity',
+]);
 
-  while (remaining.length > 0) {
-    // String (single or double quotes)
-    const strMatch = remaining.match(/^(['"`]).*?\1/);
-    if (strMatch) {
-      parts.push(<Text key={key++} color={COLORS.syntax.string}>{strMatch[0]}</Text>);
-      remaining = remaining.slice(strMatch[0].length);
+// Built-in objects/functions
+const BUILTINS = new Set([
+  'console', 'window', 'document', 'process', 'require', 'module', 'exports',
+  'Buffer', 'global', '__dirname', '__filename', 'setTimeout', 'setInterval',
+  'clearTimeout', 'clearInterval', 'Promise', 'Array', 'Object', 'String',
+  'Number', 'Boolean', 'Symbol', 'Map', 'Set', 'WeakMap', 'WeakSet', 'Date',
+  'RegExp', 'Error', 'Math', 'JSON', 'Reflect', 'Proxy', 'Intl', 'fetch',
+  'Request', 'Response', 'URL', 'URLSearchParams', 'FormData', 'Headers',
+  'print', 'len', 'range', 'list', 'dict', 'str', 'int', 'float', 'bool',
+  'open', 'input', 'type', 'isinstance', 'hasattr', 'getattr', 'setattr',
+  'super', 'property', 'classmethod', 'staticmethod', 'enumerate', 'zip',
+  'map', 'filter', 'reduce', 'sorted', 'reversed', 'any', 'all', 'sum',
+  'min', 'max', 'abs', 'round', 'format',
+]);
+
+// TypeScript/Flow type keywords
+const TYPE_KEYWORDS = new Set([
+  'string', 'number', 'boolean', 'any', 'void', 'never', 'unknown', 'object',
+  'symbol', 'bigint', 'undefined', 'null', 'Array', 'Promise', 'Record',
+  'Partial', 'Required', 'Readonly', 'Pick', 'Omit', 'Exclude', 'Extract',
+  'NonNullable', 'ReturnType', 'Parameters', 'InstanceType', 'Awaited',
+]);
+
+// Normalize language name
+function normalizeLanguage(lang?: string): string {
+  if (!lang) return 'text';
+  const l = lang.toLowerCase().trim();
+  const aliases: Record<string, string> = {
+    'js': 'javascript', 'jsx': 'javascript', 'mjs': 'javascript', 'cjs': 'javascript',
+    'ts': 'typescript', 'tsx': 'typescript', 'mts': 'typescript', 'cts': 'typescript',
+    'py': 'python', 'python3': 'python',
+    'rs': 'rust',
+    'golang': 'go',
+    'sh': 'bash', 'shell': 'bash', 'zsh': 'bash', 'fish': 'bash',
+    'scss': 'css', 'sass': 'css', 'less': 'css',
+    'yml': 'yaml',
+    'md': 'markdown',
+    'htm': 'html',
+    'psql': 'sql', 'mysql': 'sql', 'pgsql': 'sql', 'sqlite': 'sql',
+  };
+  return aliases[l] || l;
+}
+
+// Token types for precise highlighting
+type TokenType =
+  | 'keyword' | 'builtin' | 'type' | 'literal' | 'number' | 'string'
+  | 'comment' | 'function' | 'operator' | 'property' | 'variable'
+  | 'punctuation' | 'tag' | 'attribute' | 'regexp' | 'decorator'
+  | 'interpolation' | 'text';
+
+interface Token {
+  type: TokenType;
+  value: string;
+}
+
+// Tokenize a line of code
+function tokenizeLine(line: string, lang: string): Token[] {
+  const tokens: Token[] = [];
+  let pos = 0;
+  const keywords = LANG_KEYWORDS[lang] || LANG_KEYWORDS['javascript'] || new Set();
+
+  while (pos < line.length) {
+    const remaining = line.slice(pos);
+
+    // ===== Whitespace =====
+    const wsMatch = remaining.match(/^\s+/);
+    if (wsMatch) {
+      tokens.push({ type: 'text', value: wsMatch[0] });
+      pos += wsMatch[0].length;
       continue;
     }
 
-    // Comment
-    if (remaining.startsWith('//')) {
-      parts.push(<Text key={key++} color={COLORS.syntax.comment}>{remaining}</Text>);
+    // ===== Comments =====
+    // Single-line comments: // # --
+    if (remaining.startsWith('//') || remaining.startsWith('#') ||
+        (lang === 'sql' && remaining.startsWith('--'))) {
+      tokens.push({ type: 'comment', value: remaining });
+      break;
+    }
+    // JSDoc/Multiline start
+    if (remaining.startsWith('/*') || remaining.startsWith('"""') || remaining.startsWith("'''")) {
+      tokens.push({ type: 'comment', value: remaining });
       break;
     }
 
-    // Number
-    const numMatch = remaining.match(/^\d+(\.\d+)?/);
-    if (numMatch) {
-      parts.push(<Text key={key++} color={COLORS.syntax.number}>{numMatch[0]}</Text>);
-      remaining = remaining.slice(numMatch[0].length);
+    // ===== Decorators (Python @decorator, TypeScript @Component) =====
+    if (remaining.startsWith('@')) {
+      const decorMatch = remaining.match(/^@[a-zA-Z_][a-zA-Z0-9_]*/);
+      if (decorMatch) {
+        tokens.push({ type: 'decorator', value: decorMatch[0] });
+        pos += decorMatch[0].length;
+        continue;
+      }
+    }
+
+    // ===== Strings =====
+    // Template strings with interpolation ${...}
+    if (remaining.startsWith('`')) {
+      let endIdx = 1;
+      while (endIdx < remaining.length) {
+        if (remaining[endIdx] === '`' && remaining[endIdx - 1] !== '\\') {
+          endIdx++;
+          break;
+        }
+        endIdx++;
+      }
+      const str = remaining.slice(0, endIdx);
+      // Split on ${...} for interpolation highlighting
+      const interpParts = str.split(/(\$\{[^}]*\})/g);
+      for (const part of interpParts) {
+        if (part.startsWith('${') && part.endsWith('}')) {
+          tokens.push({ type: 'interpolation', value: part });
+        } else if (part) {
+          tokens.push({ type: 'string', value: part });
+        }
+      }
+      pos += str.length;
       continue;
     }
 
-    // Keyword or identifier
+    // Regular strings (single/double quotes)
+    const strMatch = remaining.match(/^(['"])(?:[^\\]|\\.)*?\1/);
+    if (strMatch) {
+      tokens.push({ type: 'string', value: strMatch[0] });
+      pos += strMatch[0].length;
+      continue;
+    }
+
+    // Triple-quoted strings (Python) - simplified
+    if (remaining.startsWith('"""') || remaining.startsWith("'''")) {
+      tokens.push({ type: 'string', value: remaining });
+      break;
+    }
+
+    // ===== RegExp (simplified - /.../) =====
+    // Only if preceded by operator or at start
+    if (remaining.startsWith('/') && remaining.length > 1 && remaining[1] !== '/') {
+      const regexMatch = remaining.match(/^\/(?:[^/\\]|\\.)+\/[gimsuy]*/);
+      if (regexMatch) {
+        tokens.push({ type: 'regexp', value: regexMatch[0] });
+        pos += regexMatch[0].length;
+        continue;
+      }
+    }
+
+    // ===== Numbers =====
+    // Hex: 0x..., Binary: 0b..., Octal: 0o..., Float: 1.5, Scientific: 1e10
+    const numMatch = remaining.match(/^(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?)/);
+    if (numMatch) {
+      tokens.push({ type: 'number', value: numMatch[0] });
+      pos += numMatch[0].length;
+      continue;
+    }
+
+    // ===== Identifiers =====
     const wordMatch = remaining.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*/);
     if (wordMatch) {
       const word = wordMatch[0];
-      if (keywords.includes(word)) {
-        parts.push(<Text key={key++} color={COLORS.syntax.keyword}>{word}</Text>);
+      const lowerWord = word.toLowerCase();
+
+      // Check what follows to determine type
+      const afterWord = remaining.slice(word.length);
+      const isFollowedByParen = /^\s*\(/.test(afterWord);
+      const isFollowedByColon = /^\s*:/.test(afterWord);
+      const isPrecededByDot = tokens.length > 0 && tokens[tokens.length - 1].value === '.';
+
+      // Determine token type
+      let type: TokenType = 'variable';
+
+      if (keywords.has(word) || keywords.has(lowerWord)) {
+        type = 'keyword';
+      } else if (LITERALS.has(word)) {
+        type = 'literal';
+      } else if (BUILTINS.has(word)) {
+        type = 'builtin';
+      } else if (TYPE_KEYWORDS.has(word) || TYPE_KEYWORDS.has(lowerWord)) {
+        type = 'type';
+      } else if (isPrecededByDot) {
+        // After a dot - could be property or method
+        type = isFollowedByParen ? 'function' : 'property';
+      } else if (isFollowedByParen) {
+        // Function call
+        type = 'function';
       } else if (word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
-        // Capitalized = likely type/class
-        parts.push(<Text key={key++} color={COLORS.syntax.type}>{word}</Text>);
-      } else {
-        parts.push(<Text key={key++} color={COLORS.text}>{word}</Text>);
+        // PascalCase = likely type/class/component
+        type = 'type';
       }
-      remaining = remaining.slice(word.length);
+
+      tokens.push({ type, value: word });
+      pos += word.length;
       continue;
     }
 
-    // Operators and punctuation
-    const opMatch = remaining.match(/^[=+\-*/<>!&|?:;,.()[\]{}]+/);
+    // ===== Operators =====
+    const opMatch = remaining.match(/^(?:===|!==|==|!=|<=|>=|=>|->|\+\+|--|\+\=|-\=|\*\=|\/\=|&&|\|\||<<|>>|[+\-*/%=<>!&|^~?:])/);
     if (opMatch) {
-      parts.push(<Text key={key++} color={COLORS.syntax.operator}>{opMatch[0]}</Text>);
-      remaining = remaining.slice(opMatch[0].length);
+      tokens.push({ type: 'operator', value: opMatch[0] });
+      pos += opMatch[0].length;
       continue;
     }
 
-    // Single character (whitespace or unknown)
-    parts.push(<Text key={key++}>{remaining[0]}</Text>);
-    remaining = remaining.slice(1);
+    // ===== Punctuation =====
+    const punctMatch = remaining.match(/^[{}[\]();,.<>]/);
+    if (punctMatch) {
+      // JSX/HTML tags
+      if (lang === 'javascript' || lang === 'typescript') {
+        if (punctMatch[0] === '<') {
+          // Check if it looks like a tag <Component or <div
+          const tagMatch = remaining.match(/^<\/?([A-Za-z][A-Za-z0-9]*)/);
+          if (tagMatch) {
+            tokens.push({ type: 'punctuation', value: '<' });
+            if (remaining[1] === '/') {
+              tokens.push({ type: 'punctuation', value: '/' });
+              pos += 2;
+            } else {
+              pos += 1;
+            }
+            tokens.push({ type: 'tag', value: tagMatch[1] });
+            pos += tagMatch[1].length;
+            continue;
+          }
+        }
+      }
+      tokens.push({ type: 'punctuation', value: punctMatch[0] });
+      pos += punctMatch[0].length;
+      continue;
+    }
+
+    // ===== Unknown single character =====
+    tokens.push({ type: 'text', value: remaining[0] });
+    pos++;
   }
 
-  return <>{parts}</>;
+  return tokens;
+}
+
+// Color mapping for token types
+const TOKEN_COLORS: Record<TokenType, string> = {
+  keyword: COLORS.syntax.keyword,       // Purple
+  builtin: COLORS.syntax.builtin,       // Blue
+  type: COLORS.syntax.type,             // Yellow
+  literal: COLORS.syntax.literal,       // Red
+  number: COLORS.syntax.number,         // Orange
+  string: COLORS.syntax.string,         // Green
+  comment: COLORS.syntax.comment,       // Gray
+  function: COLORS.syntax.function,     // Blue
+  operator: COLORS.syntax.operator,     // Cyan
+  property: COLORS.syntax.property,     // Coral
+  variable: COLORS.syntax.variable,     // White
+  punctuation: COLORS.syntax.punctuation, // Cyan
+  tag: COLORS.syntax.tag,               // Coral
+  attribute: COLORS.syntax.attribute,   // Purple
+  regexp: COLORS.syntax.regexp,         // Cyan
+  decorator: '#C792EA',                 // Purple (same as keyword)
+  interpolation: '#82AAFF',             // Blue
+  text: COLORS.text,                    // Default text
+};
+
+// Main syntax highlighting function
+function highlightLine(line: string, lang?: string): JSX.Element {
+  const normalizedLang = normalizeLanguage(lang);
+
+  // Special case: no highlighting for plain text
+  if (normalizedLang === 'text' || !lang) {
+    return <Text color={COLORS.text}>{line}</Text>;
+  }
+
+  const tokens = tokenizeLine(line, normalizedLang);
+
+  if (tokens.length === 0) {
+    return <Text color={COLORS.text}>{line}</Text>;
+  }
+
+  return (
+    <>
+      {tokens.map((token, i) => (
+        <Text key={i} color={TOKEN_COLORS[token.type]}>{token.value}</Text>
+      ))}
+    </>
+  );
 }
 
 // Financial text highlighting - makes currency, percentages, and metrics pop

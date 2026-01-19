@@ -96,14 +96,43 @@ export const grepTool: Tool = {
         maxBuffer: 10 * 1024 * 1024,
       });
 
+      const trimmed = output.trim();
+      if (!trimmed) {
+        return { success: true, matches: [], count: 0, content: 'No matches found' };
+      }
+
+      // Parse output into structured matches
+      const lines = trimmed.split('\n');
+      const matches: Array<{ file: string; line?: number; content?: string }> = [];
+
+      for (const line of lines) {
+        // Try to parse "file:line:content" format
+        const match = line.match(/^([^:]+):(\d+):(.*)$/);
+        if (match) {
+          matches.push({
+            file: match[1],
+            line: parseInt(match[2], 10),
+            content: match[3],
+          });
+        } else if (output_mode === 'files') {
+          // Just file paths
+          matches.push({ file: line });
+        } else {
+          // Fallback - just add as content
+          matches.push({ file: line, content: line });
+        }
+      }
+
       return {
         success: true,
-        content: output.trim() || 'No matches found',
+        matches,
+        count: matches.length,
+        content: trimmed,
       };
     } catch (error) {
       // grep returns exit code 1 when no matches
       if (error instanceof Error && 'status' in error && (error as NodeJS.ErrnoException & { status?: number }).status === 1) {
-        return { success: true, content: 'No matches found' };
+        return { success: true, matches: [], count: 0, content: 'No matches found' };
       }
 
       return {

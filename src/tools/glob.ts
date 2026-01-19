@@ -53,7 +53,8 @@ export const globTool: Tool = {
 
       return {
         success: true,
-        content: JSON.stringify({ files, count: files.length }),
+        files,
+        count: files.length,
       };
     } catch (error) {
       return {

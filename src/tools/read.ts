@@ -51,6 +51,7 @@ export const readTool: Tool = {
       return {
         success: true,
         content: numbered,
+        lineCount: subset.length,
         totalLines: lines.length,
         cachedForEdit: true,
       };

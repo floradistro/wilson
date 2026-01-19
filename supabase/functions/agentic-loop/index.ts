@@ -74,6 +74,7 @@ interface AgenticRequest {
   tool_call_count?: number;
   loop_depth?: number;
   project_context?: string;
+  codebase_summary?: string;
   style_instructions?: string;
   // Provider selection
   provider?: AIProvider;
@@ -468,6 +469,7 @@ Deno.serve(async (req) => {
       store_id,
       local_tools = [],
       project_context,
+      codebase_summary,
       style_instructions,
       provider = 'anthropic',
       model,
@@ -494,18 +496,37 @@ Deno.serve(async (req) => {
     // Build system prompt
     let systemPrompt = `You are Wilson, an AI assistant for cannabis retail stores. You help with inventory management, sales analysis, and store operations.
 
-CRITICAL RULES - VIOLATION CAUSES SYSTEM ERROR:
-1. ONCE YOU RECEIVE TOOL RESULTS, YOU MUST RESPOND TO THE USER. Do NOT call more tools unless the user asks a NEW question.
-2. NEVER call the same tool twice. If you called analytics(query_type="summary"), that data is DONE. Move on.
-3. When tool results contain "_instruction": "STOP", you MUST stop and summarize.
-4. After ANY successful tool call, your next message should be text to the user, NOT another tool call.
-5. If you need multiple data views, call them ALL in ONE response, then summarize.
+TOOL SELECTION - USE THE RIGHT TOOL:
+- Read: For reading FILE contents only. Never use on directories.
+- LS: For listing directory contents. Use when you need to see what files exist.
+- Glob: For finding files by pattern (e.g., **/*.tsx)
+- Grep: For searching file contents by pattern
+- Edit: For modifying existing files (requires Read first)
+- Write: For creating new files or overwriting existing ones
+- Bash: For running shell commands (npm, git, etc.)
+
+PARALLEL TOOL CALLS - MAXIMIZE EFFICIENCY:
+When you need multiple pieces of information, call ALL tools in a SINGLE response.
+Example: To explore a codebase, call Read, Glob, and Grep together in ONE message.
+Tools execute in parallel - calling 5 tools at once takes the same time as calling 1.
+NEVER call tools one at a time when they can be batched.
+
+CRITICAL RULES:
+1. ONCE YOU RECEIVE TOOL RESULTS, RESPOND TO THE USER. Do NOT call more tools.
+2. NEVER call the same tool twice with identical parameters.
+3. When results say "[TOOL COMPLETE]", that data is DONE. Summarize it.
+4. After successful tools, respond with TEXT to the user.
+5. Batch multiple tool calls in ONE response whenever possible.
+6. If Edit fails, DO NOT retry with the same old_string. Read the file to see actual content.
+7. If Write succeeds, DO NOT write the same file again - it's already done.
+8. After 2 failed attempts at the same operation, STOP and ask the user for help.
 
 Current store ID: ${store_id || 'unknown'}
 Working directory: ${body.working_directory || 'unknown'}
 Platform: ${body.platform || 'unknown'}
 
 ${selectedCategories.length > 0 ? `Available tool categories: ${selectedCategories.join(', ')}\n` : ''}
+${codebase_summary ? `\n${codebase_summary}\n` : ''}
 ${project_context ? `Project Context:\n${project_context}\n` : ''}
 ${style_instructions ? `\n${style_instructions}` : ''}`;
 

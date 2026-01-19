@@ -119,8 +119,6 @@ export function useChat() {
     // Loop tracking from backend (passed back on continuation)
     toolCallCount?: number;
     loopDepth?: number;
-    // Session-level tool history for loop detection (persists across iterations)
-    sessionToolHistory?: string[];
   }) {
     const {
       userMessage,
@@ -133,20 +131,19 @@ export function useChat() {
       depth,
       toolCallCount,
       loopDepth,
-      sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Removed aggressive client-side blocking per Anthropic guidance
-    // Instead, we rely on:
-    // 1. Tool result _instruction telling Claude to stop
-    // 2. is_error flag on failed tools
-    // 3. System prompt guidance
-    // 4. Depth limit (50) as ultimate safety net
-    // Claude is smart enough to know when to stop - trust the model
+    // LOOP PREVENTION - Anthropic's recommended approach:
+    // 1. Tool results include clear "[TOOL COMPLETE]" prefix
+    // 2. Failed tools get is_error: true
+    // 3. cache_control marks results as processed
+    // 4. Depth limit as ultimate safety net (not pattern matching)
+    //
+    // We do NOT do client-side pattern matching - it breaks legitimate parallel calls
+    // and Claude is trained to know when to stop.
 
-    // Depth limit - only as ultimate safety net
-    if (depth > 50) {
-      setError('Maximum tool iterations reached (50). Use /clear to reset.');
+    if (depth > 30) {
+      setError('Maximum iterations reached (30). Use /clear to reset.');
       updateLastMessage({ isStreaming: false });
       return;
     }
@@ -364,8 +361,10 @@ export function useChat() {
       }
 
       // Add tool results as user message
-      // Anthropic recommends setting is_error: true for failed tools
-      // Also add explicit stop instructions to prevent repeated calls
+      // Anthropic recommends:
+      // 1. is_error: true for failed tools
+      // 2. Plain text stop instruction at START of result (not buried in JSON)
+      // 3. cache_control to mark as "already seen"
       const toolResultBlocks = results.map(r => {
         let isError = false;
         let content = r.content;
@@ -374,14 +373,13 @@ export function useChat() {
           const parsed = JSON.parse(r.content);
           isError = parsed.success === false || parsed.error;
 
-          // Add explicit instruction to stop calling this tool
-          // This is critical for preventing loops
+          // Put STOP instruction as PLAIN TEXT at start - Claude reads this first
           if (parsed.success) {
-            parsed._instruction = 'STOP. You have received the data. Do NOT call this tool again. Summarize the results for the user.';
-            content = JSON.stringify(parsed);
+            content = `[TOOL COMPLETE - DO NOT CALL THIS TOOL AGAIN WITH SAME PARAMETERS]\n\n${r.content}`;
           }
         } catch {
-          // Not JSON, assume success
+          // Not JSON, still add stop instruction
+          content = `[TOOL COMPLETE]\n\n${r.content}`;
         }
 
         return {
@@ -389,6 +387,8 @@ export function useChat() {
           tool_use_id: r.tool_use_id,
           content,
           ...(isError ? { is_error: true } : {}),
+          // Anthropic cache_control to mark this result as "already processed"
+          cache_control: { type: 'ephemeral' },
         };
       });
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
@@ -405,16 +405,6 @@ export function useChat() {
       setMessages(prev => [...prev, nextAssistantMessage]);
 
       // Continue agent loop with accumulated conversation
-      // Update session tool history with "toolName:inputHash" for smarter loop detection
-      // This allows same tool with different params (e.g., analytics with different query_type)
-      const newToolEntries = completedTools.map(t => {
-        // Create a simple hash of key parameters to detect duplicate calls
-        const inputStr = JSON.stringify(t.input || {});
-        const hash = inputStr.length > 50 ? inputStr.slice(0, 50) : inputStr;
-        return `${t.name}:${hash}`;
-      });
-      const updatedSessionToolHistory = [...sessionToolHistory, ...newToolEntries];
-
       await runAgentLoop({
         userMessage,
         conversationHistory: updatedHistory,
@@ -426,7 +416,6 @@ export function useChat() {
         depth: depth + 1,
         toolCallCount: backendToolCallCount,
         loopDepth: backendLoopDepth,
-        sessionToolHistory: updatedSessionToolHistory,
       });
     } else {
       // No tools - finalize message

@@ -18,6 +18,7 @@ import { AIChooser } from './components/AIChooser.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
 import { useAIProvider } from './hooks/useAIProvider.js';
+import { useTerminalSize } from './hooks/useTerminalSize.js';
 import { config } from './config.js';
 import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
@@ -67,6 +68,9 @@ export function App({ initialQuery, flags, command }: AppProps) {
     displayName: aiDisplayName,
     switchProvider,
   } = useAIProvider();
+
+  // Terminal size - triggers re-render on resize
+  const terminalSize = useTerminalSize();
 
   const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, streamingChars, sendMessage, clearMessages, clearError } = useChat();
   const [inputValue, setInputValue] = useState('');
@@ -566,7 +570,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
   };
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" key={`app-${terminalSize.width}-${terminalSize.height}`}>
       {/* Header - rendered once via Static, scrolls up with chat */}
       <Static items={[headerItem]}>
         {(item) => (
