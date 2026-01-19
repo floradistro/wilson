@@ -157,15 +157,39 @@ export function startWorkerInPane(
 
 /**
  * Start the Commander Wilson (main orchestrator)
+ * Commander gets a special prompt that explains the swarm context
  */
 export function startCommanderInPane(
   sessionName: string,
   paneId: string,
   workingDirectory: string,
-  goal: string
+  goal: string,
+  tasks: string[]
 ): void {
-  // Commander just monitors - starts Wilson normally so user can interact
-  const command = `cd "${workingDirectory}" && wilson`;
+  // Write swarm context to a file for the commander
+  const contextFile = `/tmp/wilson-commander-${Date.now()}.txt`;
+  const fs = require('fs');
+
+  const context = `You are the COMMANDER of a Wilson swarm. You are orchestrating ${tasks.length} workers.
+
+GOAL: ${goal}
+
+WORKER TASKS:
+${tasks.map((t, i) => `- Worker ${i + 1}: ${t}`).join('\n')}
+
+Your workers are already executing their tasks in the panes below you.
+You can see their progress. Your job is to:
+1. Monitor overall progress
+2. Help coordinate if workers need guidance
+3. Integrate results when workers complete
+4. Answer any questions about the swarm
+
+The workers are working autonomously. You can interact with the user to provide status updates.`;
+
+  fs.writeFileSync(contextFile, context);
+
+  // Start Wilson with the swarm context as initial message
+  const command = `cd "${workingDirectory}" && wilson "$(cat ${contextFile})" && rm ${contextFile}`;
   sendToPane(sessionName, paneId, command);
 }
 
@@ -260,17 +284,7 @@ export function spawnSwarm(config: SwarmConfig): SwarmState {
 export function launchSwarmProcesses(state: SwarmState, tasks: string[]): void {
   const commanderPaneId = (state as any).commanderPaneId;
 
-  // Start Commander (interactive Wilson for user)
-  if (commanderPaneId) {
-    startCommanderInPane(
-      state.tmuxSession,
-      commanderPaneId,
-      state.workingDirectory,
-      state.goal
-    );
-  }
-
-  // Start Workers with their tasks
+  // Start Workers FIRST so they begin working
   state.workers.forEach((worker, index) => {
     const task = tasks[index] || state.goal;
     startWorkerInPane(
@@ -281,6 +295,19 @@ export function launchSwarmProcesses(state: SwarmState, tasks: string[]): void {
       task
     );
   });
+
+  // Small delay, then start Commander with full context
+  setTimeout(() => {
+    if (commanderPaneId) {
+      startCommanderInPane(
+        state.tmuxSession,
+        commanderPaneId,
+        state.workingDirectory,
+        state.goal,
+        tasks
+      );
+    }
+  }, 500);
 }
 
 /**
