@@ -10,6 +10,7 @@
     "start": "bun run src/index.tsx",
     "start:enhanced": "bun run src/AppEnhanced.tsx",
     "build": "bun build src/index.tsx --outdir dist --target node --minify --external @supabase/supabase-js",
+    "build:watch": "bun build src/index.tsx --outdir dist --target node --minify --external @supabase/supabase-js --watch",
     "build:enhanced": "node scripts/build-enhanced.js",
     "typecheck": "tsc --noEmit",
     "test": "echo \"Tests coming soon...\"",
