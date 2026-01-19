@@ -48,9 +48,9 @@ function RenderBlock({ block, width, streaming }: { block: Block; width: number;
       return (
         <Box flexDirection="column" gap={0}>
           {block.items.map((item, i) => (
-            <Text key={i} color={COLORS.text}>
+            <Text key={i}>
               <Text color={COLORS.textDim}>{block.ordered ? `${i + 1}. ` : ' - '}</Text>
-              {item}
+              {highlightFinancials(item)}
             </Text>
           ))}
         </Box>
@@ -62,7 +62,7 @@ function RenderBlock({ block, width, streaming }: { block: Block; width: number;
       return (
         <Box flexDirection="column" gap={0}>
           {lines.map((line, i) => (
-            <Text key={i} color={COLORS.text}>{line}</Text>
+            <Text key={i}>{highlightFinancials(line)}</Text>
           ))}
         </Box>
       );
@@ -183,6 +183,80 @@ function highlightLine(line: string, lang?: string): JSX.Element {
     // Single character (whitespace or unknown)
     parts.push(<Text key={key++}>{remaining[0]}</Text>);
     remaining = remaining.slice(1);
+  }
+
+  return <>{parts}</>;
+}
+
+// Financial text highlighting - makes currency, percentages, and metrics pop
+function highlightFinancials(text: string): JSX.Element {
+  const parts: JSX.Element[] = [];
+  let remaining = text;
+  let key = 0;
+
+  // Patterns to match (in order of priority)
+  const patterns: Array<{ regex: RegExp; color: string; bold?: boolean }> = [
+    // Section headers (Key Performance Summary:, Performance Trends:, Location Performance:)
+    { regex: /^(?:Key Performance|Performance|Location|Summary|Overview|Insights|Analysis|Trends|Breakdown)(?:\s+\w+)*:/, color: COLORS.info, bold: true },
+    // Positive percentage change (+12%, +5.5%)
+    { regex: /^\+\d+(?:\.\d+)?%/, color: COLORS.success, bold: true },
+    // Negative percentage change (-12%, -5.5%)
+    { regex: /^-\d+(?:\.\d+)?%/, color: COLORS.error, bold: true },
+    // Currency with commas ($393,082, $4,250.50)
+    { regex: /^\$[\d,]+(?:\.\d{2})?/, color: COLORS.success, bold: true },
+    // Negative currency (-$500, ($500))
+    { regex: /^-\$[\d,]+(?:\.\d{2})?/, color: COLORS.error, bold: true },
+    { regex: /^\(\$[\d,]+(?:\.\d{2})?\)/, color: COLORS.error, bold: true },
+    // Regular percentage (39%, 5.5%)
+    { regex: /^\d+(?:\.\d+)?%/, color: COLORS.secondary },
+    // Large numbers with commas (7,822)
+    { regex: /^\d{1,3}(?:,\d{3})+(?:\.\d+)?/, color: COLORS.warning },
+    // Key metric labels (before colon)
+    { regex: /^(?:Total Revenue|Revenue|Total Orders|Orders|Average Order Value|Daily Average|AOV|Units|Quantity)(?=:)/, color: COLORS.info },
+    // Location/store names
+    { regex: /^(?:Blowing Rock|Charlotte|Elizabethton|Monroe|Main Street)(?=\s|,|$)/, color: COLORS.primary },
+    // Dates and periods (Oct 21, Jan 18, Dec 18th, Q1 2024)
+    { regex: /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?/, color: COLORS.textMuted },
+    { regex: /^Q[1-4]\s+\d{4}/, color: COLORS.textMuted },
+    // "down" / "up" indicators
+    { regex: /^(?:down|decreased|declined|fell|dropped)\b/i, color: COLORS.error },
+    { regex: /^(?:up|increased|grew|rose|gained)\b/i, color: COLORS.success },
+  ];
+
+  while (remaining.length > 0) {
+    let matched = false;
+
+    for (const { regex, color, bold } of patterns) {
+      const match = remaining.match(regex);
+      if (match) {
+        parts.push(
+          <Text key={key++} color={color} bold={bold}>
+            {match[0]}
+          </Text>
+        );
+        remaining = remaining.slice(match[0].length);
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched) {
+      // Find next potential match point or take character
+      let nextMatch = remaining.length;
+      for (const { regex } of patterns) {
+        for (let i = 1; i < remaining.length; i++) {
+          if (regex.test(remaining.slice(i))) {
+            nextMatch = Math.min(nextMatch, i);
+            break;
+          }
+        }
+      }
+
+      // Output plain text up to next match
+      const plainText = remaining.slice(0, nextMatch);
+      parts.push(<Text key={key++} color={COLORS.text}>{plainText}</Text>);
+      remaining = remaining.slice(nextMatch);
+    }
   }
 
   return <>{parts}</>;
