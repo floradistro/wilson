@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { config } from '../config.js';
 import type { Message } from '../types.js';
+import type { AIProvider } from '../providers/types.js';
 
 // =============================================================================
 // Auth Storage (for headless/worker modes)
@@ -176,4 +177,75 @@ export function saveLocalHistory(conversationId: string, messages: Message[]): v
   histories = histories.slice(-10);
 
   writeFileSync(HISTORY_FILE, JSON.stringify(histories, null, 2));
+}
+
+// =============================================================================
+// AI Provider Settings
+// =============================================================================
+
+const PROVIDER_FILE = join(config.storageDir, 'provider.json');
+
+export interface ProviderSettings {
+  provider: AIProvider;
+  model: string;
+  // API keys are stored separately or in env vars
+  anthropicApiKey?: string;
+  geminiApiKey?: string;
+  openaiApiKey?: string;
+}
+
+const DEFAULT_PROVIDER_SETTINGS: ProviderSettings = {
+  provider: 'anthropic',
+  model: 'claude-sonnet-4-20250514',
+};
+
+export function loadProviderSettings(): ProviderSettings {
+  try {
+    if (existsSync(PROVIDER_FILE)) {
+      const data = readFileSync(PROVIDER_FILE, 'utf8');
+      const settings = JSON.parse(data) as Partial<ProviderSettings>;
+      return {
+        ...DEFAULT_PROVIDER_SETTINGS,
+        ...settings,
+      };
+    }
+  } catch {
+    // Corrupted file, use defaults
+  }
+  return DEFAULT_PROVIDER_SETTINGS;
+}
+
+export function saveProviderSettings(settings: Partial<ProviderSettings>): void {
+  ensureStorageDir();
+
+  const existing = loadProviderSettings();
+  const updated = {
+    ...existing,
+    ...settings,
+  };
+
+  writeFileSync(PROVIDER_FILE, JSON.stringify(updated, null, 2));
+}
+
+export function getApiKeyForProvider(provider: AIProvider): string | undefined {
+  // Check environment variables first
+  switch (provider) {
+    case 'anthropic':
+      return process.env.ANTHROPIC_API_KEY || process.env.CLAUDE_API_KEY;
+    case 'gemini':
+      return process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+    case 'openai':
+      return process.env.OPENAI_API_KEY;
+  }
+
+  // Fall back to stored settings
+  const settings = loadProviderSettings();
+  switch (provider) {
+    case 'anthropic':
+      return settings.anthropicApiKey;
+    case 'gemini':
+      return settings.geminiApiKey;
+    case 'openai':
+      return settings.openaiApiKey;
+  }
 }

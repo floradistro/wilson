@@ -8,7 +8,7 @@ import { KNIGHT_RIDER_FRAMES, KNIGHT_RIDER_INTERVAL } from '../theme/ui.js';
 const MAX_CTX = 200000;
 
 // Knight Rider style streaming indicator
-const StreamingIndicator = memo(function StreamingIndicator({
+function StreamingIndicator({
   streamingChars, startTime
 }: { streamingChars: number; startTime: number }) {
   const [frame, setFrame] = useState(0);
@@ -31,27 +31,24 @@ const StreamingIndicator = memo(function StreamingIndicator({
   const secs = elapsed % 60;
   const timeStr = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
 
-  // Render Knight Rider with color gradient
-  const currentFrame = KNIGHT_RIDER_FRAMES[frame];
+  // Simple text-based spinner
+  const spinChars = ['-', '\\', '|', '/'];
+  const spin = spinChars[frame % spinChars.length];
 
   return (
     <Box>
-      <Text>
-        {currentFrame.split('').map((char, i) => (
-          <Text key={i} color={char === '●' ? COLORS.primary : COLORS.textDisabled}>{char}</Text>
-        ))}
-      </Text>
+      <Text color={COLORS.primary}>[{spin}]</Text>
       <Text color={COLORS.textMuted}> Generating</Text>
-      <Text color={COLORS.textVeryDim}> · </Text>
+      <Text color={COLORS.textVeryDim}> - </Text>
       <Text color={COLORS.textDim}>{tokensStr} tokens</Text>
-      <Text color={COLORS.textVeryDim}> · </Text>
+      <Text color={COLORS.textVeryDim}> - </Text>
       <Text color={COLORS.textDim}>{timeStr}</Text>
     </Box>
   );
-});
+}
 
 // Idle stats - minimal single line
-const IdleStats = memo(function IdleStats({
+function IdleStats({
   usage, toolCallCount, contextTokens
 }: {
   usage: UsageStats;
@@ -89,7 +86,7 @@ const IdleStats = memo(function IdleStats({
       )}
     </Box>
   );
-});
+}
 
 interface FooterProps {
   inputValue: string;

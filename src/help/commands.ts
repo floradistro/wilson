@@ -7,7 +7,7 @@ export interface CommandDef {
   name: string;
   aliases: string[];
   description: string;
-  category: 'conversation' | 'navigation' | 'info' | 'session' | 'config' | 'swarm';
+  category: 'conversation' | 'navigation' | 'info' | 'session' | 'config';
 }
 
 export const SLASH_COMMANDS: CommandDef[] = [
@@ -26,16 +26,14 @@ export const SLASH_COMMANDS: CommandDef[] = [
   { name: 'help', aliases: ['?'], description: 'Show help', category: 'info' },
 
   // Config
-  { name: 'config', aliases: ['settings'], description: 'View and edit settings', category: 'config' },
-  { name: 'rules', aliases: ['memory'], description: 'View and edit rules', category: 'config' },
+  { name: 'ai', aliases: ['model', 'provider'], description: 'Switch AI provider/model', category: 'config' },
+  { name: 'config', aliases: ['settings'], description: 'View current settings', category: 'config' },
+  { name: 'config edit', aliases: ['settings edit'], description: 'Edit settings file', category: 'config' },
+  { name: 'rules', aliases: ['memory'], description: 'View WILSON.md rules', category: 'config' },
+  { name: 'rules edit', aliases: ['memory edit'], description: 'Edit WILSON.md', category: 'config' },
 
   // Session
   { name: 'logout', aliases: ['quit', 'exit'], description: 'Sign out', category: 'session' },
-
-  // Swarm - Multi-agent orchestration
-  { name: 'swarm', aliases: [], description: 'Start a multi-agent swarm', category: 'swarm' },
-  { name: 'swarm status', aliases: [], description: 'View swarm progress', category: 'swarm' },
-  { name: 'swarm stop', aliases: ['swarm kill'], description: 'Stop running swarm', category: 'swarm' },
 ];
 
 export const KEYBOARD_SHORTCUTS = [

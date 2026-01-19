@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, Static, useApp, useInput } from 'ink';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { Chat } from './components/Chat.js';
 import { Spinner } from './components/Spinner.js';
 import { Login } from './components/Login.js';
@@ -9,13 +12,17 @@ import { PermissionPrompt } from './components/PermissionPrompt.js';
 import { StoreSelector } from './components/StoreSelector.js';
 import { ConfigView } from './components/ConfigView.js';
 import { Footer } from './components/Footer.js';
-import { SwarmLauncher } from './components/SwarmView.js';
+import { Header } from './components/Header.js';
+import { MatrixIntro } from './components/MatrixIntro.js';
+import { AIChooser } from './components/AIChooser.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
+import { useAIProvider } from './hooks/useAIProvider.js';
 import { config } from './config.js';
 import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
 import { categorizeError, getStatusDuration } from './utils/errors.js';
+import { clearSettingsCache } from './lib/config-loader.js';
 import type { Flags, PendingQuestion, PendingPermission } from './types.js';
 
 interface AppProps {
@@ -24,7 +31,7 @@ interface AppProps {
   command?: string;
 }
 
-type ViewMode = 'chat' | 'help' | 'status' | 'config' | 'rules' | 'swarm';
+type ViewMode = 'chat' | 'help' | 'status' | 'config' | 'rules';
 type StatusType = 'info' | 'success' | 'warning' | 'error' | 'complex';
 type LoadingStage = 'initializing' | 'authenticating' | 'loading_stores';
 
@@ -52,12 +59,21 @@ export function App({ initialQuery, flags, command }: AppProps) {
     refreshStores,
   } = useAuthStore();
 
+  // AI Provider state
+  const {
+    provider: aiProvider,
+    model: aiModel,
+    displayName: aiDisplayName,
+    switchProvider,
+  } = useAIProvider();
+
   const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, streamingChars, sendMessage, clearMessages, clearError } = useChat();
   const [inputValue, setInputValue] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('chat');
   const [initialQuerySent, setInitialQuerySent] = useState(false);
   const [statusMessage, setStatusMessage] = useState<StatusMessage | null>(null);
   const [loadingStage, setLoadingStage] = useState<LoadingStage>('initializing');
+  const [showIntro, setShowIntro] = useState(true);
   const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Helper to show status message with appropriate duration
@@ -77,9 +93,8 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   // State for store/location selector
   const [selectorMode, setSelectorMode] = useState<'store' | 'location' | null>(null);
-
-  // Swarm state
-  const [swarmGoal, setSwarmGoal] = useState<string | null>(null);
+  // State for AI provider chooser
+  const [showAIChooser, setShowAIChooser] = useState(false);
   const questionResolverRef = useRef<((answer: string) => void) | null>(null);
   const permissionResolverRef = useRef<((allowed: boolean) => void) | null>(null);
 
@@ -257,44 +272,64 @@ export function App({ initialQuery, flags, command }: AppProps) {
         return true;
       }
 
-      // Config commands - interactive views with inline editing
+      // Config commands
       case '/config':
       case '/settings':
         setViewMode('config');
         return true;
+
+      case '/config edit':
+      case '/settings edit': {
+        const cwd = process.cwd();
+        const settingsPath = join(cwd, '.wilson', 'settings.json');
+        const editor = process.env.EDITOR || 'nano';
+        try {
+          execSync(`${editor} ${settingsPath}`, { stdio: 'inherit' });
+          clearSettingsCache(); // Reload after edit
+          showStatus('Settings reloaded', 'success');
+        } catch {
+          showStatus(`Open ${settingsPath} in your editor`, 'info');
+        }
+        return true;
+      }
 
       case '/rules':
       case '/memory':
         setViewMode('rules');
         return true;
 
-      // Swarm commands
-      case '/swarm status': {
-        import('./swarm/commander.js').then(mod => {
-          const status = mod.getSwarmStatus(process.cwd());
-          if (status) {
-            const progress = Math.round((status.completedTasks.length / (status.goalQueue.length + status.completedTasks.length + status.failedTasks.length)) * 100) || 0;
-            showStatus(`Swarm: ${status.status} | ${progress}% | ${status.completedTasks.length} done, ${status.failedTasks.length} failed`, 'complex');
-          } else {
-            showStatus('No swarm running in this directory', 'info');
-          }
-        });
+      case '/rules edit':
+      case '/memory edit': {
+        const cwd = process.cwd();
+        const rulesPath = existsSync(join(cwd, 'WILSON.md'))
+          ? join(cwd, 'WILSON.md')
+          : join(cwd, '.wilson', 'WILSON.md');
+        const editor = process.env.EDITOR || 'nano';
+        try {
+          execSync(`${editor} ${rulesPath}`, { stdio: 'inherit' });
+          clearSettingsCache(); // Reload after edit
+          showStatus('Rules reloaded', 'success');
+        } catch {
+          showStatus(`Open ${rulesPath} in your editor`, 'info');
+        }
         return true;
       }
 
-      case '/swarm stop':
-      case '/swarm kill': {
-        import('./swarm/commander.js').then(mod => {
-          mod.stopSwarm(process.cwd());
-          showStatus('Swarm stopped', 'success');
-        });
+      case '/ai':
+      case '/model':
+      case '/provider':
+        setShowAIChooser(true);
         return true;
-      }
 
       default:
         return false;
     }
   };
+
+  // Matrix intro on first launch
+  if (showIntro && !initialQuery && !command) {
+    return <MatrixIntro onComplete={() => setShowIntro(false)} />;
+  }
 
   // Loading state - wait for auth store to initialize
   if (!isInitialized || authLoading) {
@@ -412,10 +447,15 @@ export function App({ initialQuery, flags, command }: AppProps) {
             <Text color={COLORS.textDim}>{'Version   '}</Text>
             <Text color={COLORS.text}>v{config.version}</Text>
           </Box>
+          <Box>
+            <Text color={COLORS.textDim}>{'AI        '}</Text>
+            <Text color={COLORS.text}>{aiDisplayName}</Text>
+            <Text color={COLORS.textDim}> ({aiModel})</Text>
+          </Box>
         </Box>
 
         <Box marginTop={2}>
-          <Text color={COLORS.textDim}>Press Esc to close</Text>
+          <Text color={COLORS.textDim}>Press Esc to close | /ai to change provider</Text>
         </Box>
       </Box>
     );
@@ -423,64 +463,21 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   // Config view
   if (viewMode === 'config') {
-    return <ConfigView mode="settings" onExit={() => setViewMode('chat')} />;
+    return <ConfigView mode="settings" />;
   }
 
   // Rules view
   if (viewMode === 'rules') {
-    return <ConfigView mode="rules" onExit={() => setViewMode('chat')} />;
-  }
-
-  // Swarm view
-  if (viewMode === 'swarm' && swarmGoal && accessToken && storeId) {
-    return (
-      <SwarmLauncher
-        goal={swarmGoal}
-        accessToken={accessToken}
-        storeId={storeId}
-        workerCount={4}
-        onExit={() => {
-          setSwarmGoal(null);
-          setViewMode('chat');
-        }}
-      />
-    );
+    return <ConfigView mode="rules" />;
   }
 
   const handleSubmit = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
 
-    // IMPORTANT: Check /swarm commands FIRST (before general slash command matching)
-    // /swarm "goal" - start a swarm with the given goal
-    if (trimmed.toLowerCase().startsWith('/swarm ')) {
-      setInputValue('');
-      const afterSwarm = trimmed.slice(7).trim(); // Remove "/swarm "
-
-      // Check for subcommands
-      if (afterSwarm.toLowerCase() === 'status') {
-        handleSlashCommand('/swarm status');
-        return;
-      }
-      if (afterSwarm.toLowerCase() === 'stop' || afterSwarm.toLowerCase() === 'kill') {
-        handleSlashCommand('/swarm stop');
-        return;
-      }
-
-      // Otherwise it's a goal - strip quotes if present
-      const goal = afterSwarm.replace(/^["']|["']$/g, '').trim();
-      if (goal) {
-        setSwarmGoal(goal);
-        setViewMode('swarm');
-      } else {
-        showStatus('Usage: /swarm "your goal here"', 'warning');
-      }
-      return;
-    }
-
     // Check for slash commands (but not file paths like /Users/...)
-    // Slash commands are: /word or /word word (e.g., /config edit)
-    const slashCommandMatch = trimmed.match(/^\/([a-z?]+(?:\s+[a-z]+)?)$/i);
+    // Slash commands are: /word or /?  (short, single word, no spaces before first word)
+    const slashCommandMatch = trimmed.match(/^\/([a-z?]+)$/i);
     if (slashCommandMatch) {
       setInputValue('');
       if (handleSlashCommand(trimmed)) {
@@ -509,11 +506,11 @@ export function App({ initialQuery, flags, command }: AppProps) {
   // Get status icon based on type
   const getStatusIcon = (type: StatusType) => {
     switch (type) {
-      case 'success': return '✓';
-      case 'error': return '✗';
-      case 'warning': return '!';
-      case 'complex': return '◆';
-      default: return '•';
+      case 'success': return '[ok]';
+      case 'error': return '[err]';
+      case 'warning': return '[!]';
+      case 'complex': return '[i]';
+      default: return '[-]';
     }
   };
 
@@ -526,24 +523,32 @@ export function App({ initialQuery, flags, command }: AppProps) {
     }
   };
 
+  // Create a stable header item for Static - only re-renders when these values change
+  const headerItem = {
+    id: 'header',
+    storeName,
+    locationName: currentLocation?.name,
+    isConnected: isAuthenticated,
+    aiProvider,
+    aiModel,
+  };
+
   return (
     <Box flexDirection="column">
-      {/* Minimal header - with breathing room */}
-      <Box paddingX={1} marginBottom={1}>
-        <Text bold color={COLORS.primary}>wilson</Text>
-        <Text color={COLORS.textDisabled}> │ </Text>
-        {storeName && (
-          <>
-            <Text color={COLORS.textMuted}>{storeName}</Text>
-            {currentLocation && (
-              <>
-                <Text color={COLORS.textVeryDim}> → </Text>
-                <Text color={COLORS.textDim}>{currentLocation.name}</Text>
-              </>
-            )}
-          </>
+      {/* Header - rendered once via Static, scrolls up with chat */}
+      <Static items={[headerItem]}>
+        {(item) => (
+          <Box key={item.id} paddingX={1} marginBottom={1}>
+            <Header
+              storeName={item.storeName}
+              locationName={item.locationName}
+              isConnected={item.isConnected}
+              aiProvider={item.aiProvider}
+              aiModel={item.aiModel}
+            />
+          </Box>
         )}
-      </Box>
+      </Static>
 
       {/* Status message */}
       {statusMessage && (
@@ -573,7 +578,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
             </Box>
             {categorized.suggestion && (
               <Box marginLeft={2}>
-                <Text color={COLORS.info}>→ {categorized.suggestion}</Text>
+                <Text color={COLORS.info}>  {categorized.suggestion}</Text>
               </Box>
             )}
           </Box>
@@ -630,8 +635,27 @@ export function App({ initialQuery, flags, command }: AppProps) {
         </Box>
       )}
 
+      {/* AI Provider Chooser */}
+      {showAIChooser && (
+        <Box paddingX={1}>
+          <AIChooser
+            current={{ provider: aiProvider, model: aiModel }}
+            onSelect={(choice) => {
+              const wasConfigured = switchProvider(choice.provider, choice.model);
+              if (wasConfigured) {
+                showStatus(`Switched to ${choice.provider} (${choice.model})`, 'success');
+              } else {
+                showStatus(`${choice.provider} selected - set API key via env var`, 'warning');
+              }
+              setShowAIChooser(false);
+            }}
+            onCancel={() => setShowAIChooser(false)}
+          />
+        </Box>
+      )}
+
       {/* Footer - edge to edge */}
-      {!pendingQuestion && !pendingPermission && !selectorMode && (
+      {!pendingQuestion && !pendingPermission && !selectorMode && !showAIChooser && (
         <Footer
           inputValue={inputValue}
           onInputChange={setInputValue}

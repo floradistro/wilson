@@ -2,10 +2,6 @@ import { memo, useMemo } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { COLORS } from '../theme/colors.js';
 
-// ============================================================================
-// Markdown Renderer - Clean, minimal, no boxes
-// ============================================================================
-
 interface MarkdownProps {
   children: string;
   streaming?: boolean;
@@ -14,291 +10,285 @@ interface MarkdownProps {
 
 export const Markdown = memo(function Markdown({ children, streaming = false }: MarkdownProps) {
   const { stdout } = useStdout();
-  const width = (stdout?.columns || 80) - 4;
+  const width = (stdout?.columns || 80) - 2;
 
-  const blocks = useMemo(() => parse(children), [children]);
+  const blocks = useMemo(() => parseMarkdown(children || ''), [children]);
+
+  if (!blocks.length) return null;
 
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" gap={0}>
       {blocks.map((block, i) => (
-        <Block key={i} block={block} width={width} isLast={i === blocks.length - 1 && streaming} />
+        <RenderBlock key={i} block={block} width={width} streaming={streaming && i === blocks.length - 1} />
       ))}
     </Box>
   );
 });
 
-// ============================================================================
-// Block Types
-// ============================================================================
+// Block types
+type Block =
+  | { type: 'paragraph'; content: string }
+  | { type: 'code'; content: string; lang?: string }
+  | { type: 'list'; items: string[]; ordered: boolean }
+  | { type: 'heading'; content: string; level: number };
 
-interface ParsedBlock {
-  type: 'text' | 'code' | 'list' | 'heading';
-  content: string;
-  lang?: string;
-  level?: number;
-  items?: string[];
-  ordered?: boolean;
-}
-
-const Block = memo(function Block({ block, width, isLast }: { block: ParsedBlock; width: number; isLast?: boolean }) {
+function RenderBlock({ block, width, streaming }: { block: Block; width: number; streaming?: boolean }) {
   switch (block.type) {
     case 'heading':
-      return <HeadingBlock content={block.content} level={block.level || 1} />;
-    case 'code':
-      return <CodeBlock code={block.content} lang={block.lang} width={width} incomplete={isLast} />;
-    case 'list':
-      return <ListBlock items={block.items || []} ordered={block.ordered} />;
-    default:
-      return <TextBlock content={block.content} width={width} />;
-  }
-});
-
-// ============================================================================
-// Heading Block
-// ============================================================================
-
-const HeadingBlock = memo(function HeadingBlock({ content, level }: { content: string; level: number }) {
-  const color = level === 1 ? COLORS.primary : level === 2 ? COLORS.info : COLORS.text;
-  return (
-    <Box marginTop={1}>
-      <Text color={color} bold>{content}</Text>
-    </Box>
-  );
-});
-
-// ============================================================================
-// Text Block - Simple paragraph
-// ============================================================================
-
-const TextBlock = memo(function TextBlock({ content, width }: { content: string; width: number }) {
-  const lines = useMemo(() => wrapText(content, width), [content, width]);
-
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      {lines.map((line, i) => (
-        <Text key={i} color={COLORS.text}>{line}</Text>
-      ))}
-    </Box>
-  );
-});
-
-// ============================================================================
-// List Block - Bullets or numbers, no boxes
-// ============================================================================
-
-const ListBlock = memo(function ListBlock({ items, ordered }: { items: string[]; ordered?: boolean }) {
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      {items.map((item, i) => (
-        <Text key={i}>
-          <Text color={COLORS.textDim}>{ordered ? `${i + 1}.` : '•'} </Text>
-          <Text color={COLORS.text}>{item}</Text>
+      return (
+        <Text color={block.level === 1 ? COLORS.primary : COLORS.text} bold>
+          {block.content}
         </Text>
-      ))}
-    </Box>
-  );
-});
+      );
 
-// ============================================================================
-// Code Block - Simple, no box borders
-// ============================================================================
+    case 'code':
+      return <CodeBlock code={block.content} lang={block.lang} width={width} streaming={streaming} />;
 
+    case 'list':
+      return (
+        <Box flexDirection="column" gap={0}>
+          {block.items.map((item, i) => (
+            <Text key={i} color={COLORS.text}>
+              <Text color={COLORS.textDim}>{block.ordered ? `${i + 1}. ` : ' - '}</Text>
+              {item}
+            </Text>
+          ))}
+        </Box>
+      );
+
+    case 'paragraph':
+    default:
+      const lines = wrapText(block.content, width);
+      return (
+        <Box flexDirection="column" gap={0}>
+          {lines.map((line, i) => (
+            <Text key={i} color={COLORS.text}>{line}</Text>
+          ))}
+        </Box>
+      );
+  }
+}
+
+// Code block with syntax highlighting hints
 const CodeBlock = memo(function CodeBlock({
-  code, lang, width, incomplete
+  code, lang, width, streaming
 }: {
   code: string;
   lang?: string;
   width: number;
-  incomplete?: boolean;
+  streaming?: boolean;
 }) {
   const lines = code.split('\n');
-  const maxLines = 15;
+  const maxLines = 20;
   const show = lines.slice(0, maxLines);
   const hidden = lines.length - maxLines;
-  const lineNumWidth = String(show.length).length;
+  const lnWidth = String(Math.min(lines.length, maxLines)).length;
+  const codeWidth = width - lnWidth - 4;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
-      {/* Language label */}
+    <Box flexDirection="column" gap={0}>
+      {/* Language header */}
       {lang && (
-        <Text color={COLORS.textDim}>─ {lang} {incomplete ? '...' : ''}</Text>
+        <Text color={COLORS.textDim}>
+          {'  '}-- {lang} {streaming ? '...' : ''}
+        </Text>
       )}
 
-      {/* Code lines */}
+      {/* Code lines with line numbers */}
       {show.map((line, i) => {
-        const displayLine = line.length > width - lineNumWidth - 2
-          ? line.slice(0, width - lineNumWidth - 3) + '…'
+        const displayLine = line.length > codeWidth
+          ? line.slice(0, codeWidth - 3) + '...'
           : line;
 
         return (
           <Text key={i}>
-            <Text color={COLORS.textDisabled}>{String(i + 1).padStart(lineNumWidth)} </Text>
-            <Text color={COLORS.text}>{displayLine}</Text>
+            <Text color={COLORS.textVeryDim}>{String(i + 1).padStart(lnWidth)}  </Text>
+            <Text color={COLORS.text}>{highlightLine(displayLine, lang)}</Text>
           </Text>
         );
       })}
 
-      {/* Hidden lines indicator */}
+      {/* Truncation notice */}
       {hidden > 0 && (
         <Text color={COLORS.textVeryDim}>
-          {' '.repeat(lineNumWidth)} … {hidden} more lines
+          {' '.repeat(lnWidth)}  ... {hidden} more lines
         </Text>
       )}
     </Box>
   );
 });
 
-// ============================================================================
-// Parser - Convert markdown to blocks
-// ============================================================================
+// Simple syntax highlighting
+function highlightLine(line: string, lang?: string): JSX.Element {
+  if (!lang) return <>{line}</>;
 
-function parse(text: string): ParsedBlock[] {
-  if (!text) return [];
+  // Keywords for common languages
+  const keywords = ['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while',
+    'import', 'export', 'from', 'class', 'extends', 'new', 'this', 'async', 'await',
+    'try', 'catch', 'throw', 'default', 'switch', 'case', 'break', 'continue',
+    'true', 'false', 'null', 'undefined', 'typeof', 'instanceof'];
 
-  const blocks: ParsedBlock[] = [];
+  // Simple token-based highlighting
+  const parts: JSX.Element[] = [];
+  let remaining = line;
+  let key = 0;
 
-  // Clean up text
-  text = text
-    .replace(/\*\*([^*]+)\*\*/g, '$1')  // Remove **bold**
-    .replace(/\*\*/g, '')                // Remove stray **
-    .replace(/^##\s+/gm, '')             // Remove ## headers
-    .replace(/\n{3,}/g, '\n\n');         // Collapse multiple newlines
-
-  // Add line breaks between distinct thoughts/actions
-  // "sentence. Let me" -> "sentence.\n\nLet me"
-  text = text.replace(/([.!?:])\s*(Let me|I'll|I will|Now |Perfect|This |The |I can|I see|Here|Looking|Based on|First|Next|Finally)/g, '$1\n\n$2');
-
-  const lines = text.split('\n');
-  let buffer: string[] = [];
-  let inCode = false;
-  let codeLang = '';
-  let listItems: string[] = [];
-  let listOrdered = false;
-
-  const flushBuffer = () => {
-    if (buffer.length > 0) {
-      const content = buffer.join('\n').trim();
-      if (content) {
-        blocks.push({ type: 'text', content });
-      }
-      buffer = [];
-    }
-  };
-
-  const flushList = () => {
-    if (listItems.length > 0) {
-      blocks.push({ type: 'list', content: '', items: listItems, ordered: listOrdered });
-      listItems = [];
-    }
-  };
-
-  for (const line of lines) {
-    // Code fence
-    if (line.startsWith('```')) {
-      if (!inCode) {
-        flushBuffer();
-        flushList();
-        inCode = true;
-        codeLang = line.slice(3).trim();
-      } else {
-        blocks.push({ type: 'code', content: buffer.join('\n'), lang: codeLang });
-        buffer = [];
-        inCode = false;
-        codeLang = '';
-      }
+  while (remaining.length > 0) {
+    // String (single or double quotes)
+    const strMatch = remaining.match(/^(['"`]).*?\1/);
+    if (strMatch) {
+      parts.push(<Text key={key++} color={COLORS.syntax.string}>{strMatch[0]}</Text>);
+      remaining = remaining.slice(strMatch[0].length);
       continue;
     }
 
-    if (inCode) {
-      buffer.push(line);
+    // Comment
+    if (remaining.startsWith('//')) {
+      parts.push(<Text key={key++} color={COLORS.syntax.comment}>{remaining}</Text>);
+      break;
+    }
+
+    // Number
+    const numMatch = remaining.match(/^\d+(\.\d+)?/);
+    if (numMatch) {
+      parts.push(<Text key={key++} color={COLORS.syntax.number}>{numMatch[0]}</Text>);
+      remaining = remaining.slice(numMatch[0].length);
+      continue;
+    }
+
+    // Keyword or identifier
+    const wordMatch = remaining.match(/^[a-zA-Z_$][a-zA-Z0-9_$]*/);
+    if (wordMatch) {
+      const word = wordMatch[0];
+      if (keywords.includes(word)) {
+        parts.push(<Text key={key++} color={COLORS.syntax.keyword}>{word}</Text>);
+      } else if (word[0] === word[0].toUpperCase() && word[0] !== word[0].toLowerCase()) {
+        // Capitalized = likely type/class
+        parts.push(<Text key={key++} color={COLORS.syntax.type}>{word}</Text>);
+      } else {
+        parts.push(<Text key={key++} color={COLORS.text}>{word}</Text>);
+      }
+      remaining = remaining.slice(word.length);
+      continue;
+    }
+
+    // Operators and punctuation
+    const opMatch = remaining.match(/^[=+\-*/<>!&|?:;,.()[\]{}]+/);
+    if (opMatch) {
+      parts.push(<Text key={key++} color={COLORS.syntax.operator}>{opMatch[0]}</Text>);
+      remaining = remaining.slice(opMatch[0].length);
+      continue;
+    }
+
+    // Single character (whitespace or unknown)
+    parts.push(<Text key={key++}>{remaining[0]}</Text>);
+    remaining = remaining.slice(1);
+  }
+
+  return <>{parts}</>;
+}
+
+// Parse markdown into blocks
+function parseMarkdown(text: string): Block[] {
+  if (!text.trim()) return [];
+
+  const blocks: Block[] = [];
+  const lines = text.split('\n');
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim() || undefined;
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      blocks.push({ type: 'code', content: codeLines.join('\n'), lang });
+      i++; // skip closing ```
       continue;
     }
 
     // Heading
     const headingMatch = line.match(/^(#{1,3})\s+(.+)$/);
     if (headingMatch) {
-      flushBuffer();
-      flushList();
       blocks.push({ type: 'heading', content: headingMatch[2], level: headingMatch[1].length });
+      i++;
       continue;
     }
 
-    // Unordered list
+    // List item
     const ulMatch = line.match(/^\s*[-*+]\s+(.+)$/);
-    if (ulMatch) {
-      flushBuffer();
-      if (listOrdered && listItems.length > 0) {
-        flushList();
+    const olMatch = line.match(/^\s*(\d+)\.\s+(.+)$/);
+    if (ulMatch || olMatch) {
+      const items: string[] = [];
+      const ordered = !!olMatch;
+      while (i < lines.length) {
+        const itemMatch = ordered
+          ? lines[i].match(/^\s*\d+\.\s+(.+)$/)
+          : lines[i].match(/^\s*[-*+]\s+(.+)$/);
+        if (!itemMatch) break;
+        items.push(itemMatch[1] || itemMatch[2]);
+        i++;
       }
-      listOrdered = false;
-      listItems.push(ulMatch[1]);
+      blocks.push({ type: 'list', items, ordered });
       continue;
     }
 
-    // Ordered list
-    const olMatch = line.match(/^\s*\d+\.\s+(.+)$/);
-    if (olMatch) {
-      flushBuffer();
-      if (!listOrdered && listItems.length > 0) {
-        flushList();
+    // Paragraph - collect until empty line or special line
+    const paraLines: string[] = [];
+    while (i < lines.length) {
+      const l = lines[i];
+      if (!l.trim() || l.startsWith('```') || l.match(/^#{1,3}\s/) || l.match(/^\s*[-*+]\s/) || l.match(/^\s*\d+\.\s/)) {
+        break;
       }
-      listOrdered = true;
-      listItems.push(olMatch[1]);
-      continue;
+      paraLines.push(l);
+      i++;
     }
 
-    // Regular line
-    flushList();
-    buffer.push(line);
-  }
+    if (paraLines.length > 0) {
+      // Clean up bold/italic markers
+      let content = paraLines.join(' ')
+        .replace(/\*\*([^*]+)\*\*/g, '$1')
+        .replace(/\*([^*]+)\*/g, '$1')
+        .replace(/__([^_]+)__/g, '$1')
+        .replace(/_([^_]+)_/g, '$1')
+        .replace(/`([^`]+)`/g, '$1')
+        .trim();
 
-  // Flush remaining
-  if (inCode) {
-    blocks.push({ type: 'code', content: buffer.join('\n'), lang: codeLang });
-  } else {
-    flushBuffer();
+      if (content) {
+        blocks.push({ type: 'paragraph', content });
+      }
+    }
+
+    // Skip empty lines
+    while (i < lines.length && !lines[i].trim()) {
+      i++;
+    }
   }
-  flushList();
 
   return blocks;
 }
 
-// ============================================================================
-// Text Wrapping - preserves paragraph structure
-// ============================================================================
-
+// Word wrap
 function wrapText(text: string, width: number): string[] {
-  const result: string[] = [];
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
 
-  // Split on double newlines to get paragraphs
-  const paragraphs = text.split(/\n\n+/).filter(p => p.trim());
-
-  for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
-    const para = paragraphs[pIdx].trim();
-    if (!para) continue;
-
-    // Word wrap within paragraph
-    const words = para.replace(/\n/g, ' ').split(/\s+/);
-    let line = '';
-
-    for (const word of words) {
-      if (!word) continue;
-
-      if (line.length + word.length + 1 <= width) {
-        line += (line ? ' ' : '') + word;
-      } else {
-        if (line) result.push(line);
-        line = word.length > width ? word.slice(0, width - 1) + '…' : word;
-      }
-    }
-
-    if (line) result.push(line);
-
-    // Add blank line between paragraphs (except after last)
-    if (pIdx < paragraphs.length - 1) {
-      result.push('');
+  for (const word of words) {
+    if (line.length + word.length + 1 <= width) {
+      line += (line ? ' ' : '') + word;
+    } else {
+      if (line) lines.push(line);
+      line = word.length > width ? word.slice(0, width - 3) + '...' : word;
     }
   }
 
-  return result;
+  if (line) lines.push(line);
+  return lines;
 }
