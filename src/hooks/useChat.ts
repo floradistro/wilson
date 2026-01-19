@@ -479,7 +479,18 @@ export function useChat() {
       // This is the key fix - don't continue asking Claude what to do next
       if (hasTerminalAction) {
         log.info('Terminal action completed (dev server), stopping loop');
-        // Message is already finalized above, just return
+
+        // Find the terminal action result and show it to the user
+        const terminalResult = completedTools.find(tc => tc.result?._terminal);
+        const terminalMessage = terminalResult?.result?.content || 'Task completed successfully.';
+
+        // Update message with the terminal action's result as content
+        updateLastMessage({
+          content: iterationText || terminalMessage,
+          toolCalls: newAccumulatedTools,
+          toolData: toolDataResults.length > 0 ? toolDataResults : undefined,
+          isStreaming: false,
+        });
         return;
       }
 
