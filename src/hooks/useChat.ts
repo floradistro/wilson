@@ -355,12 +355,16 @@ export function useChat() {
         }
       }
 
-      // Mark tools as completed
+      // Mark tools as completed and add "do not repeat" hint for analytics
       const completedTools: ToolCall[] = runningTools.map(tc => {
         const result = results.find(r => r.tool_use_id === tc.id);
         if (result) {
           try {
             const parsed = JSON.parse(result.content);
+            // Add hint to analytics results to prevent repeat calls
+            if (tc.name.toLowerCase() === 'analytics' && parsed.success) {
+              parsed._hint = 'Data complete. Summarize these results for the user. Do not call analytics again with these parameters.';
+            }
             return {
               ...tc,
               status: parsed.success ? 'completed' as const : 'error' as const,
