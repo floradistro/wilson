@@ -400,18 +400,29 @@ export function useChat() {
 
       // Add tool results as user message
       // Anthropic recommends setting is_error: true for failed tools
+      // Also add explicit stop instructions to prevent repeated calls
       const toolResultBlocks = results.map(r => {
         let isError = false;
+        let content = r.content;
+
         try {
           const parsed = JSON.parse(r.content);
           isError = parsed.success === false || parsed.error;
+
+          // Add explicit instruction to stop calling this tool
+          // This is critical for preventing loops
+          if (parsed.success) {
+            parsed._instruction = 'STOP. You have received the data. Do NOT call this tool again. Summarize the results for the user.';
+            content = JSON.stringify(parsed);
+          }
         } catch {
           // Not JSON, assume success
         }
+
         return {
           type: 'tool_result',
           tool_use_id: r.tool_use_id,
-          content: r.content,
+          content,
           ...(isError ? { is_error: true } : {}),
         };
       });

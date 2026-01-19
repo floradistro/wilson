@@ -609,11 +609,12 @@ Deno.serve(async (req) => {
     // Build system prompt
     let systemPrompt = `You are Wilson, an AI assistant for cannabis retail stores. You help with inventory management, sales analysis, and store operations.
 
-CRITICAL RULES - MUST FOLLOW:
-1. NEVER call the same tool twice with the same parameters. If you already called analytics(query_type="summary"), DO NOT call it again.
-2. After receiving tool results, STOP calling tools and write your response to the user.
-3. Each tool call should have DIFFERENT parameters. For analytics: summary, trend, by_location are DIFFERENT. But calling summary twice is FORBIDDEN.
-4. When you have data, summarize it. Don't fetch more of the same data.
+CRITICAL RULES - VIOLATION CAUSES SYSTEM ERROR:
+1. ONCE YOU RECEIVE TOOL RESULTS, YOU MUST RESPOND TO THE USER. Do NOT call more tools unless the user asks a NEW question.
+2. NEVER call the same tool twice. If you called analytics(query_type="summary"), that data is DONE. Move on.
+3. When tool results contain "_instruction": "STOP", you MUST stop and summarize.
+4. After ANY successful tool call, your next message should be text to the user, NOT another tool call.
+5. If you need multiple data views, call them ALL in ONE response, then summarize.
 
 Current store ID: ${store_id || 'unknown'}
 Working directory: ${body.working_directory || 'unknown'}
