@@ -314,10 +314,11 @@ function autoDetectChart(
     };
   });
 
-  // Generate title based on query_type or key name
+  // Generate title based on query_type, label key, or value key
   let prettyTitle = fallbackTitle || '';
   const queryType = obj.query_type as string | undefined;
   const period = obj.period as Record<string, unknown> | undefined;
+  const lkLower = labelKey.toLowerCase();
 
   if (queryType === 'trend') {
     prettyTitle = 'Revenue Trend';
@@ -330,6 +331,12 @@ function autoDetectChart(
     prettyTitle = 'Revenue by Category';
   } else if (queryType === 'by_product') {
     prettyTitle = 'Top Products';
+  } else if (/category/i.test(lkLower)) {
+    // Auto-detect category breakdown from Database_query results
+    prettyTitle = 'Revenue by Category';
+  } else if (/product/i.test(lkLower)) {
+    // Auto-detect product breakdown from Database_query results
+    prettyTitle = 'Top Products by Revenue';
   } else if (!prettyTitle) {
     prettyTitle = valueKey
       .replace(/_/g, ' ')
@@ -369,10 +376,16 @@ function detectChartType(
     return 'line';
   }
 
-  // Donut chart for category breakdowns with small number of items
-  // Good for: categories, types, segments, groups (2-6 items)
-  if (dataLength >= 2 && dataLength <= 6) {
-    if (/category|type|segment|group|kind|class|brand|vendor|supplier/i.test(lk)) {
+  // Bar chart for category/product breakdowns (most common business chart)
+  // These benefit from bar chart's ability to show labels clearly
+  if (/category|product|name/i.test(lk)) {
+    return 'bar';
+  }
+
+  // Donut chart for very small datasets (2-4 items) with segment-like labels
+  // Good for: types, segments, groups, statuses
+  if (dataLength >= 2 && dataLength <= 4) {
+    if (/type|segment|group|kind|class|status/i.test(lk)) {
       return 'donut';
     }
   }

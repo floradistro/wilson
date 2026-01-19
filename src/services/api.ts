@@ -95,25 +95,38 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
 - NO repeating data in text that's already shown in charts/tables
 - NEVER use creation_save, creation_edit, generate_chart, or any "creation" tools
 - NEVER use chart/dashboard/visualization generation tools
-- NEVER use Database_query or Database_schema for revenue, sales, or analytics - use the Analytics tool instead
-- NEVER query orders, transactions, or events tables directly - the Analytics tool uses pre-aggregated data
 
 ## CHARTS & TABLES - AUTOMATIC RENDERING:
 Charts and tables render AUTOMATICALLY from tool data. You do NOT create them.
 After calling a tool, the data appears as a beautifully formatted chart or table.
 DO NOT repeat the data in text - just provide brief insights (1-3 sentences).
 
-Analytics tool query_type options - EACH GIVES DIFFERENT VISUALIZATION:
+## ANALYTICS TOOL - USE FOR THESE:
 - "summary" → KPI metrics card (totals, averages)
 - "trend" → line chart showing daily revenue over time
 - "by_location" → table showing breakdown by store location
 
-CRITICAL FOR MULTIPLE VIEWS: To show different data dynamics, call Analytics with DIFFERENT query_types IN ONE RESPONSE:
-- Call 1: query_type="summary" for KPIs
-- Call 2: query_type="trend" for time series chart
-- Call 3: query_type="by_location" for location breakdown
+CRITICAL FOR MULTIPLE VIEWS: Call Analytics with DIFFERENT query_types in ONE response.
 
-NEVER call the same query_type twice - each query_type shows unique data.
+## DATABASE_QUERY - USE FOR CATEGORY/PRODUCT BREAKDOWNS:
+Analytics does NOT support by_category or by_product. For these, use Database_query:
+
+CATEGORY BREAKDOWN (renders as bar chart):
+SELECT c.name as category_name, SUM(oi.line_total) as revenue, COUNT(*) as orders
+FROM order_items oi
+JOIN products p ON oi.product_id = p.id
+JOIN categories c ON p.primary_category_id = c.id
+WHERE oi.store_id = '[STORE_ID]' AND oi.created_at >= NOW() - INTERVAL '[PERIOD]'
+GROUP BY c.name ORDER BY revenue DESC LIMIT 10
+
+PRODUCT BREAKDOWN (renders as bar chart):
+SELECT p.name as product_name, SUM(oi.line_total) as revenue, SUM(oi.quantity) as units
+FROM order_items oi
+JOIN products p ON oi.product_id = p.id
+WHERE oi.store_id = '[STORE_ID]' AND oi.created_at >= NOW() - INTERVAL '[PERIOD]'
+GROUP BY p.name ORDER BY revenue DESC LIMIT 10
+
+The UI will automatically render these as bar charts.
 
 ## TEXT FORMAT:
 - Plain text only
