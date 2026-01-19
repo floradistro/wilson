@@ -3,6 +3,7 @@ import type { Tool, ToolResult } from '../types.js';
 import { BashSchema } from './schemas.js';
 import { checkDangerousCommand } from '../utils/safety.js';
 import { getSupabaseEnv } from './env.js';
+import { toolStreamEmitter } from '../utils/tool-stream.js';
 
 interface BashParams {
   command: string;
@@ -160,7 +161,7 @@ export function listBackgroundProcesses(): Array<{ pid: number; command: string;
 export const bashTool: Tool = {
   schema: BashSchema,
 
-  async execute(params: Record<string, unknown>): Promise<ToolResult> {
+  async execute(params: Record<string, unknown>, toolId?: string): Promise<ToolResult> {
     const {
       command,
       cwd = process.cwd(),
@@ -211,7 +212,13 @@ export const bashTool: Tool = {
 
       child.stdout?.on('data', (data: Buffer) => {
         if (stdout.length < MAX_OUTPUT) {
-          stdout += data.toString();
+          const chunk = data.toString();
+          stdout += chunk;
+          // Emit streaming output if we have a toolId
+          if (toolId) {
+            const lines = stdout.split('\n').length;
+            toolStreamEmitter.emitOutput(toolId, chunk, lines);
+          }
           if (stdout.length > MAX_OUTPUT) {
             stdout = stdout.slice(0, MAX_OUTPUT);
             truncated = true;
@@ -221,7 +228,13 @@ export const bashTool: Tool = {
 
       child.stderr?.on('data', (data: Buffer) => {
         if (stderr.length < MAX_OUTPUT) {
-          stderr += data.toString();
+          const chunk = data.toString();
+          stderr += chunk;
+          // Emit streaming output for stderr too
+          if (toolId) {
+            const lines = (stdout + stderr).split('\n').length;
+            toolStreamEmitter.emitOutput(toolId, chunk, lines);
+          }
           if (stderr.length > MAX_OUTPUT) {
             stderr = stderr.slice(0, MAX_OUTPUT);
             truncated = true;

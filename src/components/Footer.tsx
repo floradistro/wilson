@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo } from 'react';
 import { Box, Text, useInput, useStdout } from 'ink';
+import { CleanInput } from './CleanInput.js';
 import type { UsageStats } from '../types.js';
 import { CommandMenu, filterCommands } from './CommandMenu.js';
 import { COLORS } from '../theme/colors.js';
@@ -125,58 +126,30 @@ export const Footer = memo(function Footer({
     setMenuIndex(0);
   }, [query]);
 
-  useInput(useCallback((input: string, key: {
-    return?: boolean;
-    backspace?: boolean;
-    delete?: boolean;
-    ctrl?: boolean;
-    meta?: boolean;
-    escape?: boolean;
-    upArrow?: boolean;
-    downArrow?: boolean;
-    tab?: boolean;
-  }) => {
-    if (disabled) return;
-
-    if (showMenu && filteredCommands.length > 0) {
-      if (key.upArrow) {
-        setMenuIndex(i => i > 0 ? i - 1 : filteredCommands.length - 1);
-        return;
-      }
-      if (key.downArrow) {
-        setMenuIndex(i => i < filteredCommands.length - 1 ? i + 1 : 0);
-        return;
-      }
-      if (key.tab) {
-        const cmd = filteredCommands[menuIndex];
-        if (cmd) onInputChange('/' + cmd.name);
-        return;
-      }
-      if (key.return) {
-        const cmd = filteredCommands[menuIndex];
-        if (cmd) onSubmit('/' + cmd.name);
-        return;
-      }
-      if (key.escape) {
-        onInputChange('');
-        return;
-      }
-    }
-
-    if (key.return) { onSubmit(inputValue); return; }
-    if (key.backspace || key.delete) { onInputChange(inputValue.slice(0, -1)); return; }
-    if (key.ctrl || key.meta || key.escape) return;
-    if (input) onInputChange(inputValue + input);
-  }, [disabled, inputValue, onInputChange, onSubmit, showMenu, filteredCommands, menuIndex]));
-
-  // Responsive input handling
-  const promptWidth = 3;
-  const availableWidth = Math.max(20, width - promptWidth - 5);
   const inputLen = inputValue.length;
 
-  const displayValue = inputLen > availableWidth
-    ? '…' + inputValue.slice(-(availableWidth - 1))
-    : inputValue;
+  // Menu navigation handlers
+  const handleMenuNavigate = useCallback((delta: number) => {
+    setMenuIndex(prev => {
+      const newIndex = prev + delta;
+      return Math.max(0, Math.min(filteredCommands.length - 1, newIndex));
+    });
+  }, [filteredCommands.length]);
+
+  const handleMenuSelect = useCallback(() => {
+    if (filteredCommands[menuIndex]) {
+      onInputChange('/' + filteredCommands[menuIndex].name);
+    }
+  }, [filteredCommands, menuIndex, onInputChange]);
+
+  const handleMenuCancel = useCallback(() => {
+    onInputChange('');
+  }, [onInputChange]);
+
+  // Handle appending text with functional update (avoids stale closure during paste)
+  const handleAppendText = useCallback((text: string) => {
+    onInputChange(prev => prev + text);
+  }, [onInputChange]);
 
   return (
     <Box flexDirection="column">
@@ -216,13 +189,27 @@ export const Footer = memo(function Footer({
 
       {/* Input area */}
       <Box paddingX={1}>
-        <Text color={disabled ? COLORS.textDisabled : COLORS.primary}>› </Text>
-        {inputValue ? (
-          <Text color={disabled ? COLORS.textVeryDim : COLORS.text}>{displayValue}</Text>
-        ) : (
-          <Text color={COLORS.textVeryDim}>{placeholder}</Text>
-        )}
-        {!disabled && <Text color={COLORS.primary}>│</Text>}
+        <Box>
+          <Text color={disabled ? COLORS.textDisabled : COLORS.primary} bold>
+            ›{' '}
+          </Text>
+          <Box flexGrow={1}>
+            <CleanInput
+              value={inputValue}
+              onChange={onInputChange}
+              onAppendText={handleAppendText}
+              onSubmit={onSubmit}
+              placeholder={placeholder}
+              disabled={disabled}
+              menuVisible={showMenu}
+              menuItemCount={filteredCommands.length}
+              menuSelectedIndex={menuIndex}
+              onMenuNavigate={handleMenuNavigate}
+              onMenuSelect={handleMenuSelect}
+              onMenuCancel={handleMenuCancel}
+            />
+          </Box>
+        </Box>
       </Box>
     </Box>
   );

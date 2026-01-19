@@ -28,6 +28,9 @@ export interface ToolCall {
   input: Record<string, unknown>;
   status: 'pending' | 'running' | 'completed' | 'error';
   result?: ToolResult;
+  // Progressive streaming output for tools like bash, grep
+  streamingOutput?: string;
+  streamingLines?: number;
 }
 
 export interface ToolResult {
@@ -148,7 +151,7 @@ export interface Tool {
   name?: string;
   description?: string;
   schema?: ToolSchema;
-  execute: (params: Record<string, unknown>) => Promise<ToolResult>;
+  execute: (params: Record<string, unknown>, toolId?: string) => Promise<ToolResult>;
 }
 
 // =============================================================================

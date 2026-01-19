@@ -196,8 +196,8 @@ async function executeOneTool(
       }
     }
 
-    // Local execution
-    const result = await executeToolByName(tool.name, tool.input);
+    // Local execution - pass toolId for streaming support
+    const result = await executeToolByName(tool.name, tool.input, tool.id);
     return {
       tool_use_id: tool.id,
       content: JSON.stringify(result),

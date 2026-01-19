@@ -13,6 +13,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
+import { AGENTIC_WORKFLOW_INSTRUCTIONS, STYLE_INSTRUCTIONS } from '../config/system-prompts.js';
 
 // =============================================================================
 // Types
@@ -260,21 +261,28 @@ export function buildSystemPrompt(settings?: WilsonSettings): string {
   const config = settings || loadSettings();
   const memory = loadMemory();
 
-  const formattingRules = `
-## Response Formatting Rules
-- Style: ${config.formatting.style}
-- Max lines: ${config.formatting.maxLines}
-- Max bullet points: ${config.formatting.maxBulletPoints}
-- Avoid: ${config.formatting.avoidPatterns.join(', ')}
-- Use tables for comparisons: ${config.formatting.preferTables}
-- Status first: ${config.formatting.statusFirst}
-`.trim();
+  // Build complete system prompt from centralized components
+  const parts = [
+    STYLE_INSTRUCTIONS,
+    AGENTIC_WORKFLOW_INSTRUCTIONS,
+  ];
 
-  const parts = [formattingRules];
-
+  // Add project memory (WILSON.md, etc.) if available
   if (memory) {
     parts.push(memory);
   }
+
+  // Add formatting preferences
+  const formattingRules = `
+## Response Formatting Preferences
+- Style: ${config.formatting.style}
+- Max lines per section: ${config.formatting.maxLines}
+- Max bullet points: ${config.formatting.maxBulletPoints}
+- Avoid patterns: ${config.formatting.avoidPatterns.join(', ')}
+- Prefer tables: ${config.formatting.preferTables}
+- Status first: ${config.formatting.statusFirst}
+`.trim();
+  parts.push(formattingRules);
 
   return parts.join('\n\n');
 }

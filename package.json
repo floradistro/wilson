@@ -25,6 +25,7 @@
     "cli-highlight": "^2.1.11",
     "ignore": "^7.0.5",
     "ink": "^6.6.0",
+    "ink-text-input": "^6.0.0",
     "marked": "^17.0.1",
     "postgres": "^3.4.8",
     "react": "^19.2.3",

@@ -111,6 +111,7 @@ function MessageItem({ message }: { message: Message }) {
 function ToolItem({ tool }: { tool: ToolCall }) {
   const [elapsed, setElapsed] = useState(0);
   const [frame, setFrame] = useState(0);
+  const [collapsed, setCollapsed] = useState(false);
   const startRef = useRef(Date.now());
   const isRunning = tool.status === 'running';
   const isError = tool.status === 'error';
@@ -130,6 +131,7 @@ function ToolItem({ tool }: { tool: ToolCall }) {
   }, [isRunning]);
 
   const { header, detail } = formatTool(tool);
+  const hasStreamingOutput = tool.streamingOutput && tool.streamingOutput.length > 0;
 
   // Status indicator
   let statusChar: string;
@@ -158,10 +160,48 @@ function ToolItem({ tool }: { tool: ToolCall }) {
         <Text bold color={COLORS.text}>{header}</Text>
         {detail && <Text color={COLORS.textMuted}> {detail}</Text>}
         {isRunning && elapsed > 0.5 && <Text color={COLORS.textDim}> {elapsed.toFixed(1)}s</Text>}
+        {hasStreamingOutput && !isRunning && (
+          <Text color={COLORS.textVeryDim}> [{collapsed ? '▸' : '▾'}]</Text>
+        )}
       </Text>
 
-      {/* Result */}
-      <ToolResult tool={tool} />
+      {/* Streaming output - shown while running */}
+      {hasStreamingOutput && isRunning && (
+        <StreamingOutput output={tool.streamingOutput} lines={tool.streamingLines} />
+      )}
+
+      {/* Collapsed streaming output - shown when done */}
+      {hasStreamingOutput && !isRunning && !collapsed && (
+        <StreamingOutput output={tool.streamingOutput} lines={tool.streamingLines} />
+      )}
+
+      {/* Final result */}
+      {!hasStreamingOutput && <ToolResult tool={tool} />}
+    </Box>
+  );
+}
+
+// Streaming output component - shows progressive bash/grep output
+function StreamingOutput({ output, lines }: { output?: string; lines?: number }) {
+  if (!output) return null;
+
+  const outputLines = output.split('\n');
+  const maxShow = 20;
+  const show = outputLines.slice(0, maxShow);
+  const hidden = outputLines.length - maxShow;
+
+  return (
+    <Box flexDirection="column" gap={0} marginLeft={2}>
+      {show.map((line, i) => (
+        <Text key={i} color={COLORS.textDim}>
+          {'  '}{line}
+        </Text>
+      ))}
+      {hidden > 0 && (
+        <Text color={COLORS.textVeryDim}>
+          {'  '}+{hidden} more lines
+        </Text>
+      )}
     </Box>
   );
 }

@@ -52,11 +52,9 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   const model = optionsModel || providerSettings.model;
 
   // Load settings and build system prompt (Anthropic pattern)
+  // This includes all instructions, loop prevention, and project memory (WILSON.md)
   const settings = loadSettings();
   const systemPrompt = buildSystemPrompt(settings);
-
-  // Read project context if available (legacy - now handled by buildSystemPrompt)
-  const projectContext = getProjectContext();
 
   // Get codebase index summary (helps Claude understand project structure)
   const codebaseSummary = getCodebaseSummary();
@@ -84,7 +82,6 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     // Loop tracking - backend uses these to enforce limits
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,
-    project_context: projectContext,
     // Codebase index summary (helps Claude understand project structure)
     codebase_summary: codebaseSummary,
     // Server-side context management (safety net for token overflow)
@@ -92,53 +89,8 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     // AI Provider selection
     provider,
     model,
-    // Style instructions for terminal CLI output
-    style_instructions: `Terminal CLI. STRICT RULES:
-
-## FORBIDDEN - NEVER DO THESE:
-- NO ** bold markers anywhere
-- NO emojis
-- NO ASCII art charts (no ████ bars, no drawing charts in text)
-- NO describing what charts look like
-- NO "here's a bar chart showing..."
-- NO React/Recharts/visualization code
-- NO markdown tables (| col | col |) - the UI renders tables automatically from tool data
-- NO repeating data in text that's already shown in charts/tables
-- NEVER use creation_save, creation_edit, generate_chart, or any "creation" tools
-- NEVER use chart/dashboard/visualization generation tools
-
-## CHARTS & TABLES - AUTOMATIC RENDERING:
-Charts and tables render AUTOMATICALLY from tool data. You do NOT create them.
-After calling a tool, the data appears as a beautifully formatted chart or table.
-DO NOT repeat the data in text - just provide brief insights (1-3 sentences).
-
-## ANALYTICS TOOL:
-Analytics tool query_type options - EACH GIVES DIFFERENT VISUALIZATION:
-- "summary" → KPI metrics card (totals, averages)
-- "trend" → line chart showing daily revenue over time
-- "by_location" → table showing breakdown by store location
-
-CRITICAL FOR MULTIPLE VIEWS: To show different data dynamics, call Analytics with DIFFERENT query_types IN ONE RESPONSE:
-- Call 1: query_type="summary" for KPIs
-- Call 2: query_type="trend" for time series chart
-- Call 3: query_type="by_location" for location breakdown
-
-NEVER call the same query_type twice - each query_type shows unique data.
-
-## DATABASE_QUERY FOR CATEGORY/PRODUCT:
-For category or product breakdowns (Analytics doesn't support these), use Database_query with these patterns:
-
-CATEGORY: SELECT c.name as category_name, SUM(oi.line_total) as revenue FROM order_items oi JOIN products p ON oi.product_id = p.id JOIN categories c ON p.primary_category_id = c.id WHERE oi.store_id = '[STORE_ID]' GROUP BY c.name ORDER BY revenue DESC LIMIT 10
-
-PRODUCT: SELECT p.name as product_name, SUM(oi.line_total) as revenue FROM order_items oi JOIN products p ON oi.product_id = p.id WHERE oi.store_id = '[STORE_ID]' GROUP BY p.name ORDER BY revenue DESC LIMIT 10
-
-## TEXT FORMAT:
-- Plain text only
-- Code in \`\`\` fences
-- Simple bullet lists with -
-- No decorations
-
-${systemPrompt}`,
+    // Complete system prompt (includes style, behavior, loop prevention, and project memory)
+    system_prompt: systemPrompt,
   };
 
   // Create abort controller for timeout
@@ -424,26 +376,6 @@ function getAllToolSchemas(): ToolSchema[] {
   }
 
   return dedupedLocal;
-}
-
-function getProjectContext(): string | undefined {
-  const cwd = process.cwd();
-  const possibleFiles = ['WILSON.md', 'CLAUDE.md', 'LISA.md', 'AI.md'];
-
-  for (const file of possibleFiles) {
-    const filePath = join(cwd, file);
-    if (existsSync(filePath)) {
-      try {
-        const content = readFileSync(filePath, 'utf8');
-        // Limit to 10K chars
-        return content.slice(0, 10000);
-      } catch {
-        // Ignore read errors
-      }
-    }
-  }
-
-  return undefined;
 }
 
 // Get or build codebase index summary for system prompt

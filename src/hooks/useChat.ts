@@ -6,6 +6,8 @@ import { sendChatRequest } from '../services/api.js';
 import { compactConversation } from '../utils/context.js';
 import { truncateAssistantContent } from '../utils/context-manager.js';
 import { log } from '../utils/logger.js';
+import { createIterationWarning, createProgressReflectionPrompt, enhanceToolResult } from '../config/system-prompts.js';
+import { toolStreamEmitter } from '../utils/tool-stream.js';
 
 // =============================================================================
 // Loop Prevention - Anthropic Best Practices
@@ -73,6 +75,35 @@ export function useChat() {
         abortControllerRef.current.abort();
       }
     };
+  }, []);
+
+  // Subscribe to tool streaming events
+  useEffect(() => {
+    const unsubscribe = toolStreamEmitter.subscribe((event) => {
+      if (event.type === 'output') {
+        // Update the tool's streaming output in real-time
+        setMessages(prev => {
+          const copy = [...prev];
+          const lastIdx = copy.length - 1;
+          if (lastIdx >= 0 && copy[lastIdx].role === 'assistant' && copy[lastIdx].toolCalls) {
+            const tools = copy[lastIdx].toolCalls!.map(tool => {
+              if (tool.id === event.toolId && tool.status === 'running') {
+                return {
+                  ...tool,
+                  streamingOutput: (tool.streamingOutput || '') + (event.data || ''),
+                  streamingLines: event.lines,
+                };
+              }
+              return tool;
+            });
+            copy[lastIdx] = { ...copy[lastIdx], toolCalls: tools };
+          }
+          return copy;
+        });
+      }
+    });
+
+    return unsubscribe;
   }, []);
 
   const sendMessage = useCallback(async (
@@ -155,6 +186,8 @@ export function useChat() {
     // Tool deduplication - track all tool calls in this turn
     toolHistory?: ToolCallSignature[];
     lastToolSignature?: ToolCallSignature;
+    // Track recent tool names for pattern detection
+    recentToolNames?: string[];
   }) {
     const {
       userMessage,
@@ -169,18 +202,45 @@ export function useChat() {
       loopDepth,
       toolHistory = [],
       lastToolSignature,
+      recentToolNames = [],
     } = params;
 
     // ==========================================================================
-    // LOOP PREVENTION - Anthropic Best Practices
+    // SOFT ITERATION LIMITS - Anthropic Best Practices
     // ==========================================================================
-    // Claude Code approach: NO artificial iteration limits
-    // Instead, rely on:
+    // Provide warnings and guidance at key milestones to prevent loops
+    // Hard stop at 15 iterations (much lower than previous 50)
+
+    // Hard stop at 15 iterations
+    if (depth >= 15) {
+      log.error(`Hard limit: ${depth} iterations exceeded`);
+      setError(`Task stopped after ${depth} iterations. This may be too complex for a single request.`);
+      updateLastMessage({
+        content: `Task incomplete after ${depth} iterations. Please try breaking this into smaller, more specific tasks.`,
+        toolCalls: accumulatedTools,
+        isStreaming: false,
+      });
+      return;
+    }
+
+    // Soft warnings at milestones
+    if (depth === 5 || depth === 10) {
+      const warning = createIterationWarning(depth);
+      if (warning) {
+        log.warn(`Soft limit reached: depth ${depth}`);
+        conversationHistory.push({
+          role: 'user',
+          content: warning,
+        });
+      }
+    }
+
+    // ==========================================================================
+    // LOOP PREVENTION - Deduplication & Pattern Detection
+    // ==========================================================================
     // 1. Tool call deduplication (same tool + same params = blocked)
     // 2. Consecutive identical tool detection (immediate stop)
     // 3. Natural termination when Claude produces text without tools
-    //
-    // Only stop for truly pathological cases (50+ iterations = something broken)
 
     // Compact conversation if approaching context limit (Claude Code style)
     const { messages: compactedHistory, wasCompacted, tokensAfter } = compactConversation(conversationHistory);
@@ -305,47 +365,19 @@ export function useChat() {
     // Execute pending tools if any
     if (pendingTools && pendingTools.length > 0) {
       // ========================================================================
-      // LOOP PREVENTION: Tool Deduplication
+      // TOOL TRACKING (not blocking - trust the model with guidance)
       // ========================================================================
+      // Track tool usage for pattern detection in hints, but DON'T block
+      // Anthropic approach: Guide the model with feedback, don't prevent it
       const newToolHistory = [...toolHistory];
       let newLastToolSignature: ToolCallSignature | undefined;
-      const toolsToExecute: typeof pendingTools = [];
-      const blockedTools: string[] = [];
+      const toolsToExecute = pendingTools; // Execute ALL tools - no blocking
 
+      // Track signatures for pattern detection in hints
       for (const tool of pendingTools) {
         const signature = createToolSignature(tool.name, tool.input);
-
-        // Check 1: Is this tool identical to the LAST tool called? (consecutive duplicate)
-        if (lastToolSignature && signaturesMatch(signature, lastToolSignature)) {
-          log.warn(`Loop prevention: blocked consecutive duplicate tool call: ${tool.name}`);
-          blockedTools.push(`${tool.name} (consecutive duplicate)`);
-          continue;
-        }
-
-        // Check 2: Has this exact tool+params been called before in this turn?
-        const isDuplicate = newToolHistory.some(prev => signaturesMatch(prev, signature));
-        if (isDuplicate) {
-          log.warn(`Loop prevention: blocked duplicate tool call: ${tool.name}`);
-          blockedTools.push(`${tool.name} (already called with same params)`);
-          continue;
-        }
-
-        // Tool is allowed - add to history and execute list
         newToolHistory.push(signature);
         newLastToolSignature = signature;
-        toolsToExecute.push(tool);
-      }
-
-      // If ALL tools were blocked, stop the loop gracefully (no error shown)
-      if (toolsToExecute.length === 0) {
-        log.info('Loop prevention: duplicate tools blocked, completing gracefully');
-        // Just finalize the message without any error - the task is done
-        updateLastMessage({
-          content: iterationText || 'Done.',
-          toolCalls: accumulatedTools,
-          isStreaming: false,
-        });
-        return;
       }
 
       setToolCallCount(prev => prev + toolsToExecute.length);
@@ -395,18 +427,11 @@ export function useChat() {
       }
 
       // Mark tools as completed
-      // Check for terminal actions (like dev server start) that should end the loop
-      let hasTerminalAction = false;
-
       const completedTools: ToolCall[] = runningTools.map(tc => {
         const result = results.find(r => r.tool_use_id === tc.id);
         if (result) {
           try {
             const parsed = JSON.parse(result.content);
-            // Check if this is a terminal action (e.g., dev server started)
-            if (parsed._terminal) {
-              hasTerminalAction = true;
-            }
             return {
               ...tc,
               status: parsed.success ? 'completed' as const : 'error' as const,
@@ -441,32 +466,43 @@ export function useChat() {
         updatedHistory.push({ role: 'assistant', content: truncatedContent });
       }
 
-      // Add tool results as user message
+      // Add tool results as user message with enhanced hints
       // Anthropic recommends:
       // 1. is_error: true for failed tools
       // 2. Plain text stop instruction at START of result (not buried in JSON)
-      // 3. cache_control to mark as "already seen"
+      // 3. Specific guidance on what to do next
+      // 4. cache_control to mark as "already seen"
       const toolResultBlocks = results.map(r => {
+        // Find the tool that produced this result
+        const tool = toolsToExecute.find(t => t.id === r.tool_use_id);
+        const toolName = tool?.name || 'Unknown';
+
         let isError = false;
-        let content = r.content;
+        let parsed: any = {};
 
         try {
-          const parsed = JSON.parse(r.content);
+          parsed = JSON.parse(r.content);
           isError = parsed.success === false || parsed.error;
-
-          // Put STOP instruction as PLAIN TEXT at start - Claude reads this first
-          if (parsed.success) {
-            content = `[TOOL COMPLETE - DO NOT CALL THIS TOOL AGAIN WITH SAME PARAMETERS]\n\n${r.content}`;
-          }
         } catch {
-          // Not JSON, still add stop instruction
-          content = `[TOOL COMPLETE]\n\n${r.content}`;
+          // Not JSON, treat as success
+          parsed = { success: true, content: r.content };
         }
+
+        // Track recent tool names for pattern detection (last 10)
+        const currentRecentTools = [...recentToolNames, ...completedTools.map(t => t.name)].slice(-10);
+
+        // Use enhanced tool result with specific guidance
+        const enhancedContent = enhanceToolResult(
+          toolName,
+          parsed,
+          depth + 1, // Next iteration
+          currentRecentTools
+        );
 
         return {
           type: 'tool_result',
           tool_use_id: r.tool_use_id,
-          content,
+          content: enhancedContent,
           ...(isError ? { is_error: true } : {}),
           // Anthropic cache_control to mark this result as "already processed"
           cache_control: { type: 'ephemeral' },
@@ -474,23 +510,17 @@ export function useChat() {
       });
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
 
-      // If a terminal action completed (like dev server started), STOP the loop
-      // This is the key fix - don't continue asking Claude what to do next
-      if (hasTerminalAction) {
-        log.info('Terminal action completed (dev server), stopping loop');
+      // Track recent tool names for pattern detection
+      const newRecentToolNames = [...recentToolNames, ...toolsToExecute.map(t => t.name)].slice(-10);
 
-        // Find the terminal action result and show it to the user
-        const terminalResult = completedTools.find(tc => tc.result?._terminal);
-        const terminalMessage = terminalResult?.result?.content || 'Task completed successfully.';
-
-        // Update message with the terminal action's result as content
-        updateLastMessage({
-          content: iterationText || terminalMessage,
-          toolCalls: newAccumulatedTools,
-          toolData: toolDataResults.length > 0 ? toolDataResults : undefined,
-          isStreaming: false,
+      // Add progress reflection at milestones (every 5 iterations, but not at soft limit points)
+      if (depth > 0 && depth % 5 === 0 && depth < 10) {
+        const reflectionPrompt = createProgressReflectionPrompt(depth, newRecentToolNames);
+        log.info(`Adding progress reflection at depth ${depth}`);
+        updatedHistory.push({
+          role: 'user',
+          content: reflectionPrompt,
         });
-        return;
       }
 
       // Create a NEW assistant message for the next iteration
@@ -520,6 +550,8 @@ export function useChat() {
         // Pass tool history for loop prevention
         toolHistory: newToolHistory,
         lastToolSignature: newLastToolSignature,
+        // Pass recent tool names for pattern detection
+        recentToolNames: newRecentToolNames,
       });
     } else {
       // No tools - finalize message

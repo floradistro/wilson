@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Box, Text, useInput } from 'ink';
+import { Box, Text, useInput, Static } from 'ink';
 import chalk from 'chalk';
 import { COLORS } from '../theme/colors.js';
 import { ICONS, SPACING } from '../theme/ui.js';
 import { DESIGN_SYSTEM } from '../theme/design-system.js';
+import { parseBracketedPaste } from '../utils/bracketed-paste.js';
 
 interface EnhancedInputProps {
   value: string;
@@ -34,7 +35,14 @@ export function EnhancedInput({
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [cursorVisible, setCursorVisible] = useState(true);
+  const [cursorPosition, setCursorPosition] = useState(value.length);
+  const [lastEscapeTime, setLastEscapeTime] = useState(0);
   const inputRef = useRef<string>(value);
+
+  // Update cursor position when value changes externally
+  useEffect(() => {
+    setCursorPosition(Math.min(cursorPosition, value.length));
+  }, [value]);
 
   // Cursor blinking animation
   useEffect(() => {
@@ -55,47 +63,148 @@ export function EnhancedInput({
 
   useInput((input, key) => {
     if (disabled) return;
-    
-    // Handle special keys
+
+    // Handle Enter key
     if (key.return) {
       if (showSuggestions && filteredSuggestions[selectedSuggestion]) {
-        onChange(filteredSuggestions[selectedSuggestion]);
+        const suggestion = filteredSuggestions[selectedSuggestion];
+        onChange(suggestion);
+        setCursorPosition(suggestion.length);
         setShowSuggestions(false);
+        return;
+      }
+
+      // Shift+Enter or Option+Enter: Add newline (multi-line support)
+      if (key.shift || (key.meta && !key.ctrl)) {
+        const newValue = value.slice(0, cursorPosition) + '\n' + value.slice(cursorPosition);
+        onChange(newValue);
+        setCursorPosition(cursorPosition + 1);
+        return;
+      }
+
+      // Plain Enter: Submit
+      onSubmit(value);
+      return;
+    }
+
+    // ESC: Double tap to clear, single tap to dismiss suggestions or stop
+    if (key.escape) {
+      const now = Date.now();
+      const timeSinceLastEscape = now - lastEscapeTime;
+
+      if (showSuggestions) {
+        // First ESC: dismiss suggestions
+        setShowSuggestions(false);
+        setLastEscapeTime(now);
+      } else if (timeSinceLastEscape < 500) {
+        // Double ESC within 500ms: clear input
+        onChange('');
+        setCursorPosition(0);
+        setLastEscapeTime(0);
       } else {
-        onSubmit(value);
+        // Single ESC when streaming: signal to stop (handled by parent)
+        setLastEscapeTime(now);
       }
       return;
     }
 
-    if (key.escape) {
-      setShowSuggestions(false);
-      return;
-    }
-
     if (key.tab && filteredSuggestions.length > 0) {
-      onChange(filteredSuggestions[selectedSuggestion] || filteredSuggestions[0]);
+      const suggestion = filteredSuggestions[selectedSuggestion] || filteredSuggestions[0];
+      onChange(suggestion);
+      setCursorPosition(suggestion.length);
       setShowSuggestions(false);
       return;
     }
 
-    if (key.upArrow && showSuggestions) {
-      setSelectedSuggestion(Math.max(0, selectedSuggestion - 1));
+    if (key.upArrow) {
+      if (showSuggestions) {
+        setSelectedSuggestion(Math.max(0, selectedSuggestion - 1));
+      }
       return;
     }
 
-    if (key.downArrow && showSuggestions) {
-      setSelectedSuggestion(Math.min(filteredSuggestions.length - 1, selectedSuggestion + 1));
+    if (key.downArrow) {
+      if (showSuggestions) {
+        setSelectedSuggestion(Math.min(filteredSuggestions.length - 1, selectedSuggestion + 1));
+      }
       return;
     }
 
-    // Handle text input
-    if (key.backspace || key.delete) {
-      const newValue = value.slice(0, -1);
+    // Navigation keys
+    if (key.leftArrow) {
+      setCursorPosition(Math.max(0, cursorPosition - 1));
+      return;
+    }
+
+    if (key.rightArrow) {
+      setCursorPosition(Math.min(value.length, cursorPosition + 1));
+      return;
+    }
+
+    // Home/End or Ctrl+A/E
+    if (key.ctrl && input === 'a') {
+      setCursorPosition(0);
+      return;
+    }
+
+    if (key.ctrl && input === 'e') {
+      setCursorPosition(value.length);
+      return;
+    }
+
+    // Ctrl+U: Clear line (Unix style)
+    if (key.ctrl && input === 'u') {
+      onChange('');
+      setCursorPosition(0);
+      return;
+    }
+
+    // Ctrl+K: Kill from cursor to end
+    if (key.ctrl && input === 'k') {
+      const newValue = value.slice(0, cursorPosition);
       onChange(newValue);
-      setShowSuggestions(newValue.length > 2 && filteredSuggestions.length > 0);
-    } else if (input && value.length < maxLength) {
-      const newValue = value + input;
+      return;
+    }
+
+    // Ctrl+W: Delete word backwards
+    if (key.ctrl && input === 'w') {
+      const beforeCursor = value.slice(0, cursorPosition);
+      const afterCursor = value.slice(cursorPosition);
+      const words = beforeCursor.trimEnd().split(/\s+/);
+      words.pop();
+      const newBefore = words.join(' ') + (words.length > 0 ? ' ' : '');
+      const newValue = newBefore + afterCursor;
       onChange(newValue);
+      setCursorPosition(newBefore.length);
+      return;
+    }
+
+    // Handle text editing
+    if (key.backspace) {
+      if (cursorPosition > 0) {
+        const newValue = value.slice(0, cursorPosition - 1) + value.slice(cursorPosition);
+        onChange(newValue);
+        setCursorPosition(cursorPosition - 1);
+        setShowSuggestions(newValue.length > 2 && filteredSuggestions.length > 0);
+      }
+      return;
+    }
+
+    if (key.delete) {
+      if (cursorPosition < value.length) {
+        const newValue = value.slice(0, cursorPosition) + value.slice(cursorPosition + 1);
+        onChange(newValue);
+        setShowSuggestions(newValue.length > 2 && filteredSuggestions.length > 0);
+      }
+      return;
+    }
+
+    // Regular character input
+    if (input && !key.ctrl && !key.meta && value.length < maxLength) {
+      // Insert text at cursor position
+      const newValue = value.slice(0, cursorPosition) + input + value.slice(cursorPosition);
+      onChange(newValue);
+      setCursorPosition(cursorPosition + input.length);
       setShowSuggestions(newValue.length > 2 && suggestions.length > 0);
     }
   });
@@ -117,13 +226,87 @@ export function EnhancedInput({
     ? COLORS.textDisabled 
     : COLORS.text;
 
-  const cursor = cursorVisible && isFocused && !isLoading ? '▊' : '';
+  const cursor = cursorVisible && isFocused && !isLoading ? '▊' : ' ';
   const displayValue = value || '';
   const showPlaceholder = displayValue.length === 0 && !isLoading;
 
+  // Split text at cursor position for proper cursor rendering
+  const beforeCursor = displayValue.slice(0, cursorPosition);
+  const atCursor = displayValue.charAt(cursorPosition) || ' ';
+  const afterCursor = displayValue.slice(cursorPosition + 1);
+
+  // Simple single-line rendering - multi-line breaks layout
+  const renderContent = () => {
+    if (isLoading) {
+      return (
+        <Text color={COLORS.textMuted}>
+          {ICONS.spinner.frames[0]} Processing...
+        </Text>
+      );
+    }
+
+    if (showPlaceholder) {
+      return <Text color={COLORS.textDim}>{placeholder}</Text>;
+    }
+
+    // Render multi-line properly
+    const lines = displayValue.split('\n');
+    if (lines.length > 1) {
+      // Multi-line: render each line separately
+      let charsSoFar = 0;
+      return (
+        <Box flexDirection="column">
+          {lines.map((line, idx) => {
+            const lineStart = charsSoFar;
+            const lineEnd = charsSoFar + line.length;
+            const hasCursor = cursorPosition >= lineStart && cursorPosition <= lineEnd;
+
+            if (hasCursor) {
+              const pos = cursorPosition - lineStart;
+              const before = line.slice(0, pos);
+              const at = line.charAt(pos) || ' ';
+              const after = line.slice(pos + 1);
+
+              charsSoFar = lineEnd + 1;
+              return (
+                <Box key={idx}>
+                  <Text color={inputColor}>{before}</Text>
+                  <Text inverse={cursorVisible && isFocused}>{cursorVisible && isFocused ? at : ''}</Text>
+                  <Text color={inputColor}>{after}</Text>
+                </Box>
+              );
+            }
+
+            charsSoFar = lineEnd + 1;
+            return <Box key={idx}><Text color={inputColor}>{line || ' '}</Text></Box>;
+          })}
+        </Box>
+      );
+    }
+
+    // Single line: simple rendering
+    const before = displayValue.slice(0, cursorPosition);
+    const at = displayValue.charAt(cursorPosition) || ' ';
+    const after = displayValue.slice(cursorPosition + 1);
+
+    return (
+      <>
+        <Text color={inputColor}>{before}</Text>
+        <Text
+          color={COLORS.primary}
+          backgroundColor={cursorVisible && isFocused ? COLORS.primary : undefined}
+          inverse={cursorVisible && isFocused}
+        >
+          {cursorVisible && isFocused ? at : ''}
+        </Text>
+        <Text color={inputColor}>{after}</Text>
+      </>
+    );
+  };
+
   return (
     <Box flexDirection="column">
-      {/* Main input row */}
+      {/* Main input area */}
       <Box>
         {/* Prompt */}
         <Box marginRight={1}>
@@ -137,37 +320,18 @@ export function EnhancedInput({
 
         {/* Input area */}
         <Box flexGrow={1} minWidth={0}>
-          {isLoading ? (
-            <Box>
-              <Text color={COLORS.textMuted}>
-                {ICONS.spinner.frames[0]} Processing...
-              </Text>
-            </Box>
-          ) : showPlaceholder ? (
-            <Text color={COLORS.textDim}>
-              {placeholder}
-            </Text>
-          ) : (
-            <Box>
-              <Text color={inputColor}>
-                {displayValue}
-              </Text>
-              <Text color={COLORS.primary}>
-                {cursor}
-              </Text>
-            </Box>
-          )}
+          {renderContent()}
         </Box>
-
-        {/* Character count for long inputs */}
-        {value.length > maxLength * 0.8 && (
-          <Box marginLeft={2}>
-            <Text color={value.length >= maxLength ? COLORS.error : COLORS.textMuted}>
-              {value.length}/{maxLength}
-            </Text>
-          </Box>
-        )}
       </Box>
+
+      {/* Character count for long inputs */}
+      {value.length > maxLength * 0.8 && (
+        <Box marginLeft={2}>
+          <Text color={value.length >= maxLength ? COLORS.error : COLORS.textMuted}>
+            {value.length}/{maxLength}
+          </Text>
+        </Box>
+      )}
 
       {/* Suggestions dropdown */}
       {showSuggestions && filteredSuggestions.length > 0 && (
@@ -203,7 +367,7 @@ export function EnhancedInput({
       {!showSuggestions && !isLoading && (
         <Box marginTop={1} paddingLeft={prompt.length + 2}>
           <Text color={COLORS.textVeryDim} dimColor>
-            Press Enter to send • /help for commands • Ctrl+C to exit
+            Enter: send • Shift+Enter: new line • ←→: navigate • Ctrl+A/E: start/end • Ctrl+U: clear
           </Text>
         </Box>
       )}

@@ -18,6 +18,7 @@ import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { parseArgs, printHelp, printVersion } from './utils/args.js';
 import { flushTelemetrySync } from './services/telemetry.js';
 import { validateTerminal } from './utils/terminal.js';
+import { enableBracketedPaste, disableBracketedPaste } from './utils/bracketed-paste.js';
 
 // Parse command line arguments
 const args = parseArgs(process.argv.slice(2));
@@ -106,6 +107,25 @@ if (firstArg === 'test') {
     command = 'version';
   }
 
+  // Bracketed paste mode causes issues with Ink - disable it
+  // Let terminal and Ink handle paste naturally
+  // enableBracketedPaste();
+
+  // Clean up on exit
+  const cleanup = () => {
+    // disableBracketedPaste();
+  };
+
+  process.on('exit', cleanup);
+  process.on('SIGINT', () => {
+    cleanup();
+    process.exit(0);
+  });
+  process.on('SIGTERM', () => {
+    cleanup();
+    process.exit(0);
+  });
+
   const { waitUntilExit } = render(
     <ErrorBoundary>
       <App
@@ -118,6 +138,7 @@ if (firstArg === 'test') {
 
   waitUntilExit().then(async () => {
     // Flush any pending telemetry before exit
+    cleanup();
     await flushTelemetrySync();
     process.exit(0);
   });

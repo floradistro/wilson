@@ -17,6 +17,10 @@ import { indexTool, searchTool, symbolTool } from './search.js';
 import { fetchTool, supabaseFetchTool } from './fetch.js';
 import { envTool } from './env.js';
 import { storeTools, storeSchemas } from './store.js';
+// Inventory Transfer tools
+import { transferTools, transferSchemas } from './transfer.js';
+// Location context management
+import { locationContextTools, locationContextSchemas } from './location-context.js';
 // Xcode & iOS development tools
 import { xcodeTools } from './xcode.js';
 // Project management tools (npm, git, bun)
@@ -64,6 +68,10 @@ export const tools: Record<string, Tool> = {
   Env: envTool,
   // Store configuration tools
   ...storeTools,
+  // Inventory Transfer tools
+  ...transferTools,
+  // Location context management
+  ...locationContextTools,
   // Xcode & iOS development tools
   ...xcodeTools,
   // Project management tools (npm, git, bun)
@@ -77,7 +85,7 @@ export const tools: Record<string, Tool> = {
 };
 
 export function getToolSchemas(): ToolSchema[] {
-  return [...ALL_SCHEMAS, ...storeSchemas, WorkflowSchema];
+  return [...ALL_SCHEMAS, ...storeSchemas, ...transferSchemas, ...locationContextSchemas, WorkflowSchema];
 }
 
 // Create flexible lookup map with various name formats
@@ -119,37 +127,80 @@ toolLookup['configure'] = tools.Env;
 toolLookup['wire_up'] = tools.Env;
 toolLookup['credentials'] = tools.Env;
 // Store tool aliases
+// Products
 toolLookup['products'] = tools.ProductList;
 toolLookup['list_products'] = tools.ProductList;
+toolLookup['products_search'] = tools.ProductList;
+toolLookup['Products_find'] = tools.ProductList;  // Wilson tries this!
+toolLookup['find_products'] = tools.ProductList;
+toolLookup['search_products'] = tools.ProductList;
+toolLookup['get_products'] = tools.ProductList;
+toolLookup['Products_at_location'] = tools.ProductList;  // Wilson tries this too!
+toolLookup['products_at_location'] = tools.ProductList;
 toolLookup['create_product'] = tools.ProductCreate;
 toolLookup['update_product'] = tools.ProductUpdate;
+// Categories
 toolLookup['categories'] = tools.CategoryList;
 toolLookup['list_categories'] = tools.CategoryList;
 toolLookup['create_category'] = tools.CategoryCreate;
+// Field Groups
 toolLookup['field_groups'] = tools.FieldGroupList;
 toolLookup['custom_fields'] = tools.FieldGroupList;
+// Pricing
 toolLookup['pricing'] = tools.PricingTemplateList;
 toolLookup['pricing_templates'] = tools.PricingTemplateList;
+// Tax & Shipping
 toolLookup['tax_rates'] = tools.TaxRateList;
 toolLookup['taxes'] = tools.TaxRateList;
 toolLookup['shipping'] = tools.ShippingMethodList;
 toolLookup['shipping_methods'] = tools.ShippingMethodList;
+// Locations (THE FIX FOR THE LOOP ISSUE!)
 toolLookup['locations'] = tools.LocationList;
 toolLookup['stores'] = tools.LocationList;
+toolLookup['locations_find'] = tools.LocationList;  // lowercase
+toolLookup['Locations_find'] = tools.LocationList;  // CamelCase - Wilson tries this!
+toolLookup['find_locations'] = tools.LocationList;
+toolLookup['get_locations'] = tools.LocationList;
+toolLookup['list_locations'] = tools.LocationList;
+toolLookup['search_locations'] = tools.LocationList;
+toolLookup['location_list'] = tools.LocationList;
+toolLookup['create_location'] = tools.LocationCreate;
+// Registers
 toolLookup['registers'] = tools.RegisterList;
 toolLookup['pos_registers'] = tools.RegisterList;
+// Payment Processors
 toolLookup['payment_processors'] = tools.PaymentProcessorList;
 toolLookup['processors'] = tools.PaymentProcessorList;
+// Store Config
 toolLookup['store_config'] = tools.StoreConfigGet;
 toolLookup['config'] = tools.StoreConfigGet;
+// Inventory
 toolLookup['inventory'] = tools.InventoryLowStock;
 toolLookup['low_stock'] = tools.InventoryLowStock;
 toolLookup['adjust_inventory'] = tools.InventoryAdjust;
 toolLookup['stock_adjust'] = tools.InventoryAdjust;
+// Coupons
 toolLookup['coupons'] = tools.CouponList;
 toolLookup['discounts'] = tools.CouponList;
 toolLookup['create_coupon'] = tools.CouponCreate;
 toolLookup['validate_coupon'] = tools.CouponValidate;
+
+// Transfer tool aliases
+toolLookup['transfer'] = tools.TransferInventory;
+toolLookup['transfer_inventory'] = tools.TransferInventory;
+toolLookup['Transfer_inventory'] = tools.TransferInventory;  // Wilson tried this! ✅
+toolLookup['Transferinventory'] = tools.TransferInventory;  // Wilson tried this first
+toolLookup['transferinventory'] = tools.TransferInventory;
+toolLookup['move_inventory'] = tools.TransferInventory;
+toolLookup['inventory_transfer'] = tools.TransferInventory;
+
+// Location context tool aliases
+toolLookup['set_location'] = tools.SetLocationContext;
+toolLookup['switch_location'] = tools.SetLocationContext;
+toolLookup['change_location'] = tools.SetLocationContext;
+toolLookup['location_context'] = tools.GetLocationContext;
+toolLookup['get_location'] = tools.GetLocationContext;
+toolLookup['current_location'] = tools.GetLocationContext;
 
 // Xcode tool aliases
 toolLookup['xcodebuild'] = tools.XcodeBuild;
@@ -213,7 +264,7 @@ toolLookup['askuserquestion'] = specialPlaceholder;
 export async function executeToolByName(
   name: string,
   params: Record<string, unknown>,
-  conversationId?: string
+  toolId?: string
 ): Promise<ToolResult> {
   const startTime = Date.now();
 
@@ -236,7 +287,8 @@ export async function executeToolByName(
   }
 
   try {
-    const result = await tool.execute(params);
+    // Pass toolId to tools that support streaming
+    const result = await tool.execute(params, toolId);
     const executionTime = Date.now() - startTime;
 
     // Local audit log
@@ -248,7 +300,7 @@ export async function executeToolByName(
       execution_time_ms: executionTime,
       result_status: result.success ? 'success' : 'error',
       error_message: result.error,
-      conversation_id: conversationId,
+      conversation_id: toolId,
     });
 
     return result;
@@ -265,7 +317,7 @@ export async function executeToolByName(
       execution_time_ms: executionTime,
       result_status: 'error',
       error_message: result.error,
-      conversation_id: conversationId,
+      conversation_id: toolId,
     });
 
     return result;

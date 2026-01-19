@@ -136,17 +136,17 @@ export const productListTool: Tool = {
     };
 
     const queryParams: Record<string, string> = {
-      select: 'id,name,sku,regular_price,stock_quantity,status,category_name,featured_image,low_stock_threshold',
+      select: 'id,name,sku,regular_price,stock_quantity,status,primary_category_id,featured_image,low_stock_amount',
       limit: String(limit),
       offset: String(offset),
       order: `${order}.asc`,
     };
 
     if (ctx.storeId) queryParams.store_id = `eq.${ctx.storeId}`;
-    if (category) queryParams.category_name = `ilike.*${category}*`;
+    if (category) queryParams.primary_category_id = `eq.${category}`;  // Changed from category_name to primary_category_id
     if (status) queryParams.status = `eq.${status}`;
     if (search) queryParams.or = `(name.ilike.*${search}*,sku.ilike.*${search}*)`;
-    if (low_stock) queryParams.stock_quantity = `lt.low_stock_threshold`;
+    if (low_stock) queryParams.stock_quantity = `lt.low_stock_amount`;
 
     const { data, error, count } = await supabaseRequest<unknown[]>(ctx, 'products', { params: queryParams });
 
@@ -850,7 +850,7 @@ export const locationListTool: Tool = {
     if (!ctx) return { success: false, error: 'Missing Supabase config.' };
 
     const queryParams: Record<string, string> = {
-      select: 'id,name,slug,address,city,state,zip,phone,is_active,is_default,tax_rate,accepts_online_orders',
+      select: 'id,name,slug,address_line1,address_line2,city,state,zip,phone,is_active,is_default,accepts_online_orders',
       order: 'name.asc',
     };
 
@@ -876,16 +876,16 @@ export const LocationCreateSchema: ToolSchema = {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Location name' },
-      address: { type: 'string', description: 'Street address' },
+      address_line1: { type: 'string', description: 'Street address line 1' },
+      address_line2: { type: 'string', description: 'Street address line 2 (optional)' },
       city: { type: 'string', description: 'City' },
       state: { type: 'string', description: 'State code' },
       zip: { type: 'string', description: 'ZIP code' },
       phone: { type: 'string', description: 'Phone number' },
-      tax_rate: { type: 'number', description: 'Local tax rate override' },
       is_default: { type: 'boolean', description: 'Set as default location' },
       accepts_online_orders: { type: 'boolean', description: 'Accepts online orders (default: true)' },
     },
-    required: ['name', 'address', 'city', 'state', 'zip'],
+    required: ['name', 'address_line1', 'city', 'state', 'zip'],
   },
 };
 

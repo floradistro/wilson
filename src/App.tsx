@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Text, Static, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput } from 'ink';
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -19,6 +19,7 @@ import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
 import { useAIProvider } from './hooks/useAIProvider.js';
 import { useTerminalSize } from './hooks/useTerminalSize.js';
+import { usePasteInterceptor } from './hooks/usePasteInterceptor.js';
 import { config } from './config.js';
 import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
@@ -559,32 +560,18 @@ export function App({ initialQuery, flags, command }: AppProps) {
     }
   };
 
-  // Create a stable header item for Static - only re-renders when these values change
-  const headerItem = {
-    id: 'header',
-    storeName,
-    locationName: currentLocation?.name,
-    isConnected: isAuthenticated,
-    aiProvider,
-    aiModel,
-  };
-
   return (
-    <Box flexDirection="column" key={`app-${terminalSize.width}-${terminalSize.height}`}>
-      {/* Header - rendered once via Static, scrolls up with chat */}
-      <Static items={[headerItem]}>
-        {(item) => (
-          <Box key={item.id} paddingX={1} marginBottom={1}>
-            <Header
-              storeName={item.storeName}
-              locationName={item.locationName}
-              isConnected={item.isConnected}
-              aiProvider={item.aiProvider}
-              aiModel={item.aiModel}
-            />
-          </Box>
-        )}
-      </Static>
+    <Box flexDirection="column">
+      {/* Header - updates naturally on resize */}
+      <Box paddingX={1} marginBottom={1}>
+        <Header
+          storeName={storeName}
+          locationName={currentLocation?.name}
+          isConnected={isAuthenticated}
+          aiProvider={aiProvider}
+          aiModel={aiModel}
+        />
+      </Box>
 
       {/* Status message */}
       {statusMessage && (
