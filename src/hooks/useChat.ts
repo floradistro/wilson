@@ -159,15 +159,14 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Only catch true loops (identical consecutive calls)
-    // Anthropic pattern: allow unlimited DIFFERENT calls, stop on REPETITION
-
-    if (sessionToolHistory.length >= 3) {
-      const last3 = sessionToolHistory.slice(-3);
-      // 3 identical calls in a row = stuck loop
-      if (last3[0] === last3[1] && last3[1] === last3[2]) {
-        const toolName = last3[0].split(':')[0];
-        setError(`Loop detected: ${toolName} repeated 3x. Use /clear to reset.`);
+    // LOOP DETECTION: Catch loops early - stop on 2nd identical consecutive call
+    // This prevents duplicate charts from being rendered
+    if (sessionToolHistory.length >= 2) {
+      const last2 = sessionToolHistory.slice(-2);
+      // 2 identical calls in a row = loop starting, stop immediately
+      if (last2[0] === last2[1]) {
+        const toolName = last2[0].split(':')[0];
+        setError(`Loop detected: ${toolName} called twice with same params. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
         return;
       }
