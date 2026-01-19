@@ -4,6 +4,48 @@ import { config } from '../config.js';
 import type { Message } from '../types.js';
 
 // =============================================================================
+// Auth Storage (for headless/worker modes)
+// =============================================================================
+
+const AUTH_STORE_FILE = join(config.storageDir, 'auth.json');
+
+interface StoredAuth {
+  accessToken: string | null;
+  refreshToken: string | null;
+  storeId: string | null;
+  storeName: string | null;
+  expiresAt: number | null;
+}
+
+/**
+ * Load auth credentials from storage (for use in worker/validator modes)
+ */
+export function loadAuthFromStorage(): StoredAuth | null {
+  try {
+    if (existsSync(AUTH_STORE_FILE)) {
+      const data = readFileSync(AUTH_STORE_FILE, 'utf8');
+      const auth = JSON.parse(data);
+
+      // Check if token is expired
+      if (auth.expiresAt && Date.now() > auth.expiresAt) {
+        return null;
+      }
+
+      return {
+        accessToken: auth.accessToken || null,
+        refreshToken: auth.refreshToken || null,
+        storeId: auth.storeId || null,
+        storeName: auth.storeName || null,
+        expiresAt: auth.expiresAt || null,
+      };
+    }
+  } catch {
+    // Corrupted file
+  }
+  return null;
+}
+
+// =============================================================================
 // Storage Paths
 // =============================================================================
 

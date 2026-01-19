@@ -12,6 +12,7 @@ import { PermissionPrompt } from './components/PermissionPrompt.js';
 import { StoreSelector } from './components/StoreSelector.js';
 import { ConfigView } from './components/ConfigView.js';
 import { Footer } from './components/Footer.js';
+import { SwarmLauncher } from './components/SwarmView.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
 import { config } from './config.js';
@@ -27,7 +28,7 @@ interface AppProps {
   command?: string;
 }
 
-type ViewMode = 'chat' | 'help' | 'status' | 'config' | 'rules';
+type ViewMode = 'chat' | 'help' | 'status' | 'config' | 'rules' | 'swarm';
 type StatusType = 'info' | 'success' | 'warning' | 'error' | 'complex';
 type LoadingStage = 'initializing' | 'authenticating' | 'loading_stores';
 
@@ -80,6 +81,9 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   // State for store/location selector
   const [selectorMode, setSelectorMode] = useState<'store' | 'location' | null>(null);
+
+  // Swarm state
+  const [swarmGoal, setSwarmGoal] = useState<string | null>(null);
   const questionResolverRef = useRef<((answer: string) => void) | null>(null);
   const permissionResolverRef = useRef<((allowed: boolean) => void) | null>(null);
 
@@ -300,6 +304,29 @@ export function App({ initialQuery, flags, command }: AppProps) {
         return true;
       }
 
+      // Swarm commands
+      case '/swarm status': {
+        import('./swarm/commander.js').then(mod => {
+          const status = mod.getSwarmStatus(process.cwd());
+          if (status) {
+            const progress = Math.round((status.completedTasks.length / (status.goalQueue.length + status.completedTasks.length + status.failedTasks.length)) * 100) || 0;
+            showStatus(`Swarm: ${status.status} | ${progress}% | ${status.completedTasks.length} done, ${status.failedTasks.length} failed`, 'complex');
+          } else {
+            showStatus('No swarm running in this directory', 'info');
+          }
+        });
+        return true;
+      }
+
+      case '/swarm stop':
+      case '/swarm kill': {
+        import('./swarm/commander.js').then(mod => {
+          mod.stopSwarm(process.cwd());
+          showStatus('Swarm stopped', 'success');
+        });
+        return true;
+      }
+
       default:
         return false;
     }
@@ -440,13 +467,29 @@ export function App({ initialQuery, flags, command }: AppProps) {
     return <ConfigView mode="rules" />;
   }
 
+  // Swarm view
+  if (viewMode === 'swarm' && swarmGoal && accessToken && storeId) {
+    return (
+      <SwarmLauncher
+        goal={swarmGoal}
+        accessToken={accessToken}
+        storeId={storeId}
+        workerCount={4}
+        onExit={() => {
+          setSwarmGoal(null);
+          setViewMode('chat');
+        }}
+      />
+    );
+  }
+
   const handleSubmit = async (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
 
     // Check for slash commands (but not file paths like /Users/...)
-    // Slash commands are: /word or /?  (short, single word, no spaces before first word)
-    const slashCommandMatch = trimmed.match(/^\/([a-z?]+)$/i);
+    // Slash commands are: /word or /word word (e.g., /config edit)
+    const slashCommandMatch = trimmed.match(/^\/([a-z?]+(?:\s+[a-z]+)?)$/i);
     if (slashCommandMatch) {
       setInputValue('');
       if (handleSlashCommand(trimmed)) {
@@ -459,6 +502,28 @@ export function App({ initialQuery, flags, command }: AppProps) {
       } else {
         showStatus(`Unknown command: ${trimmed}. Type /help for available commands.`, 'warning');
       }
+      return;
+    }
+
+    // Check for /swarm "goal" command (with argument)
+    const swarmMatch = trimmed.match(/^\/swarm\s+["']?(.+?)["']?$/i);
+    if (swarmMatch) {
+      setInputValue('');
+      const goal = swarmMatch[1].trim();
+      if (goal) {
+        setSwarmGoal(goal);
+        setViewMode('swarm');
+      } else {
+        showStatus('Usage: /swarm "your goal here"', 'warning');
+      }
+      return;
+    }
+
+    // Check for /swarm status or /swarm stop
+    const swarmSubcommandMatch = trimmed.match(/^\/swarm\s+(status|stop|kill)$/i);
+    if (swarmSubcommandMatch) {
+      setInputValue('');
+      handleSlashCommand(`/swarm ${swarmSubcommandMatch[1]}`);
       return;
     }
 

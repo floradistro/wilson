@@ -7,7 +7,7 @@ export interface CommandDef {
   name: string;
   aliases: string[];
   description: string;
-  category: 'conversation' | 'navigation' | 'info' | 'session' | 'config';
+  category: 'conversation' | 'navigation' | 'info' | 'session' | 'config' | 'swarm';
 }
 
 export const SLASH_COMMANDS: CommandDef[] = [
@@ -33,6 +33,11 @@ export const SLASH_COMMANDS: CommandDef[] = [
 
   // Session
   { name: 'logout', aliases: ['quit', 'exit'], description: 'Sign out', category: 'session' },
+
+  // Swarm - Multi-agent orchestration
+  { name: 'swarm', aliases: [], description: 'Start a multi-agent swarm', category: 'swarm' },
+  { name: 'swarm status', aliases: [], description: 'View swarm progress', category: 'swarm' },
+  { name: 'swarm stop', aliases: ['swarm kill'], description: 'Stop running swarm', category: 'swarm' },
 ];
 
 export const KEYBOARD_SHORTCUTS = [

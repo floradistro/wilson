@@ -23,6 +23,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
       flags.verbose = true;
     } else if (arg === '--dangerously-skip-permissions') {
       flags.dangerouslySkipPermissions = true;
+    } else if (arg === '--worker' && argv[i + 1]) {
+      flags.worker = argv[++i];
+    } else if (arg === '--validator') {
+      flags.validator = true;
+    } else if (arg === '--swarm-monitor' && argv[i + 1]) {
+      flags.swarmMonitor = argv[++i];
     } else if (!arg.startsWith('-')) {
       // Skip known commands
       if (!['login', 'logout', 'version', 'update', 'check-updates'].includes(arg)) {

@@ -57,6 +57,43 @@ if (firstArg === 'test') {
 } else if (firstArg === 'check-updates') {
   // Handle check-updates command directly
   import('./commands/update.js').then(mod => mod.checkUpdatesCommand()).catch(console.error);
+} else if (args.flags.worker) {
+  // Swarm worker mode - runs headlessly, pulling tasks from queue
+  import('./swarm/worker.js').then(async mod => {
+    const { loadAuthFromStorage } = await import('./services/storage.js');
+    const auth = loadAuthFromStorage();
+    if (!auth?.accessToken || !auth?.storeId) {
+      console.error('Not authenticated. Run wilson login first.');
+      process.exit(1);
+    }
+    await mod.runWorkerLoop({
+      workerId: args.flags.worker!,
+      workingDirectory: process.cwd(),
+      accessToken: auth.accessToken,
+      storeId: auth.storeId,
+    });
+  }).catch(err => {
+    console.error('Worker error:', err);
+    process.exit(1);
+  });
+} else if (args.flags.validator) {
+  // Swarm validator mode
+  import('./swarm/validator.js').then(async mod => {
+    const { getIPCPaths } = await import('./swarm/queue.js');
+    const paths = getIPCPaths(process.cwd());
+    await mod.runValidatorLoop(paths);
+  }).catch(err => {
+    console.error('Validator error:', err);
+    process.exit(1);
+  });
+} else if (args.flags.swarmMonitor) {
+  // Swarm monitor mode
+  import('./swarm/commander.js').then(async mod => {
+    await mod.monitorSwarm(process.cwd());
+  }).catch(err => {
+    console.error('Monitor error:', err);
+    process.exit(1);
+  });
 } else {
   // Normal mode - determine command and render the app
   let command: string | undefined;

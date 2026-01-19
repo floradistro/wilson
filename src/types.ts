@@ -43,6 +43,10 @@ export interface Flags {
   verbose?: boolean;
   help?: boolean;
   version?: boolean;
+  // Swarm mode flags
+  worker?: string;      // Worker ID for swarm worker mode
+  validator?: boolean;  // Run as swarm validator
+  swarmMonitor?: string; // Run as swarm monitor with goal
 }
 
 // =============================================================================
