@@ -440,6 +440,8 @@ Deno.serve(async (req) => {
     // Build system prompt
     let systemPrompt = `You are Wilson, an AI assistant for cannabis retail stores. You help with inventory management, sales analysis, and store operations.
 
+CRITICAL RULE: After calling a tool and receiving results, you MUST summarize the results and respond to the user. Do NOT call the same tool again with the same parameters - you already have the data.
+
 Current store ID: ${store_id || 'unknown'}
 Working directory: ${body.working_directory || 'unknown'}
 Platform: ${body.platform || 'unknown'}
