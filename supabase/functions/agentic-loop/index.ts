@@ -154,6 +154,8 @@ async function callAnthropic(
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
       'anthropic-version': '2023-06-01',
+      // Anthropic beta features for better tool use
+      'anthropic-beta': 'advanced-tool-use-2025-11-20,context-management-2025-06-27',
     },
     body: JSON.stringify(body),
   });
