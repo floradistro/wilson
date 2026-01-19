@@ -314,8 +314,8 @@ export const transferInventoryTool: Tool = {
 
     return {
       success: true,
-      content: formattedOutput,
-      summary: `✅ Transfer ${data.transfer_number}: ${itemsCount} products (${totalQty}${items[0]?.unit || 'g'}) ${fromLocationName} → ${toLocationName}`,
+      content: `${formattedOutput}\n\n✅ TRANSFER COMPLETE. Task finished. Do not transfer additional products unless explicitly requested.`,
+      summary: `✅ Transfer ${data.transfer_number}: ${itemsCount} products (${totalQty}${items[0]?.unit || 'g'}) ${fromLocationName} → ${toLocationName} - COMPLETE`,
       data: {
         transfer_id: data.transfer_id,
         transfer_number: data.transfer_number,

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, Static, useApp, useInput } from 'ink';
 import { execSync } from 'child_process';
 import { existsSync } from 'fs';
 import { join } from 'path';
@@ -12,14 +12,11 @@ import { PermissionPrompt } from './components/PermissionPrompt.js';
 import { StoreSelector } from './components/StoreSelector.js';
 import { ConfigView } from './components/ConfigView.js';
 import { Footer } from './components/Footer.js';
-import { Header } from './components/Header.js';
 import { MatrixIntro } from './components/MatrixIntro.js';
 import { AIChooser } from './components/AIChooser.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
 import { useAIProvider } from './hooks/useAIProvider.js';
-import { useTerminalSize } from './hooks/useTerminalSize.js';
-import { usePasteInterceptor } from './hooks/usePasteInterceptor.js';
 import { config } from './config.js';
 import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
@@ -69,9 +66,6 @@ export function App({ initialQuery, flags, command }: AppProps) {
     displayName: aiDisplayName,
     switchProvider,
   } = useAIProvider();
-
-  // Terminal size - triggers re-render on resize
-  const terminalSize = useTerminalSize();
 
   const { messages, isStreaming, error, todos, usage, toolCallCount, contextTokens, streamingChars, sendMessage, clearMessages, clearError } = useChat();
   const [inputValue, setInputValue] = useState('');
@@ -562,17 +556,6 @@ export function App({ initialQuery, flags, command }: AppProps) {
 
   return (
     <Box flexDirection="column">
-      {/* Header - updates naturally on resize */}
-      <Box paddingX={1} marginBottom={1}>
-        <Header
-          storeName={storeName}
-          locationName={currentLocation?.name}
-          isConnected={isAuthenticated}
-          aiProvider={aiProvider}
-          aiModel={aiModel}
-        />
-      </Box>
-
       {/* Status message */}
       {statusMessage && (
         <Box paddingX={1} marginBottom={1}>
@@ -585,7 +568,7 @@ export function App({ initialQuery, flags, command }: AppProps) {
       {/* Todo List */}
       {todos.length > 0 && <Box paddingX={1} marginBottom={1}><TodoList todos={todos} /></Box>}
 
-      {/* Chat Messages - generous spacing */}
+      {/* Chat Messages - scrolling content */}
       <Box paddingX={1} flexDirection="column" marginBottom={1}>
         <Chat messages={displayMessages} isStreaming={isStreaming} />
       </Box>
@@ -690,6 +673,9 @@ export function App({ initialQuery, flags, command }: AppProps) {
           contextTokens={contextTokens}
           streamingChars={streamingChars}
           isStreaming={isStreaming}
+          storeName={storeName}
+          locationName={currentLocation?.name}
+          aiModel={aiModel}
         />
       )}
     </Box>

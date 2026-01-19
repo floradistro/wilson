@@ -100,11 +100,16 @@ interface FooterProps {
   contextTokens: number;
   streamingChars: number;
   isStreaming: boolean;
+  // Store/location info
+  storeName?: string | null;
+  locationName?: string | null;
+  aiModel?: string;
 }
 
 export const Footer = memo(function Footer({
   inputValue, onInputChange, onSubmit, placeholder = 'Message wilson...',
   disabled = false, usage, toolCallCount, contextTokens, streamingChars, isStreaming,
+  storeName, locationName, aiModel,
 }: FooterProps) {
   const { stdout } = useStdout();
   const width = Math.max(40, (stdout?.columns || 80) - 1);
@@ -165,25 +170,32 @@ export const Footer = memo(function Footer({
       {/* Thin divider */}
       <Text color={COLORS.textDisabled}>{'─'.repeat(width)}</Text>
 
-      {/* Status line - minimal, Claude Code style */}
-      <Box paddingX={1} justifyContent="space-between">
-        <Box>
-          {isStreaming ? (
-            <StreamingIndicator
-              streamingChars={streamingChars}
-              startTime={streamStartRef.current}
-            />
-          ) : (
-            <IdleStats
-              usage={usage}
-              toolCallCount={toolCallCount}
-              contextTokens={contextTokens}
-            />
-          )}
-        </Box>
-        {/* Right side - just show char count when typing long input */}
-        {inputLen > 200 && !isStreaming && (
-          <Text color={inputLen > 500 ? COLORS.warning : COLORS.textVeryDim}>{inputLen}</Text>
+      {/* Status line - single line, no wrapping */}
+      <Box paddingX={1}>
+        {isStreaming ? (
+          <StreamingIndicator
+            streamingChars={streamingChars}
+            startTime={streamStartRef.current}
+          />
+        ) : (
+          <Text>
+            <Text color={COLORS.textDim}>{storeName || 'ready'}</Text>
+            {locationName && width > 60 && (
+              <>
+                <Text color={COLORS.textVeryDim}> {'>'} </Text>
+                <Text color={COLORS.textVeryDim}>{locationName.length > 15 ? locationName.slice(0, 12) + '...' : locationName}</Text>
+              </>
+            )}
+            <Text color={COLORS.textDisabled}> · </Text>
+            {usage.inputTokens > 0 ? (
+              <>
+                <Text color={COLORS.textDim}>{Math.round((contextTokens / MAX_CTX) * 100)}%</Text>
+                <Text color={COLORS.textVeryDim}> ctx</Text>
+              </>
+            ) : (
+              <Text color={COLORS.textVeryDim}>Ready</Text>
+            )}
+          </Text>
         )}
       </Box>
 

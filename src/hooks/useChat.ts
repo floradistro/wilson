@@ -206,34 +206,11 @@ export function useChat() {
     } = params;
 
     // ==========================================================================
-    // SOFT ITERATION LIMITS - Anthropic Best Practices
     // ==========================================================================
-    // Provide warnings and guidance at key milestones to prevent loops
-    // Hard stop at 15 iterations (much lower than previous 50)
-
-    // Hard stop at 15 iterations
-    if (depth >= 15) {
-      log.error(`Hard limit: ${depth} iterations exceeded`);
-      setError(`Task stopped after ${depth} iterations. This may be too complex for a single request.`);
-      updateLastMessage({
-        content: `Task incomplete after ${depth} iterations. Please try breaking this into smaller, more specific tasks.`,
-        toolCalls: accumulatedTools,
-        isStreaming: false,
-      });
-      return;
-    }
-
-    // Soft warnings at milestones
-    if (depth === 5 || depth === 10) {
-      const warning = createIterationWarning(depth);
-      if (warning) {
-        log.warn(`Soft limit reached: depth ${depth}`);
-        conversationHistory.push({
-          role: 'user',
-          content: warning,
-        });
-      }
-    }
+    // ITERATION LIMITS - Feedback-Driven (No Arbitrary Hard Limits)
+    // ==========================================================================
+    // Only stop if truly stuck based on actual tool failure patterns
+    // Hard limits removed - trust the model with feedback loops
 
     // ==========================================================================
     // LOOP PREVENTION - Deduplication & Pattern Detection
@@ -472,6 +449,9 @@ export function useChat() {
       // 2. Plain text stop instruction at START of result (not buried in JSON)
       // 3. Specific guidance on what to do next
       // 4. cache_control to mark as "already seen"
+      // Track tool results for feedback loop
+      const toolSuccesses: boolean[] = [];
+
       const toolResultBlocks = results.map(r => {
         // Find the tool that produced this result
         const tool = toolsToExecute.find(t => t.id === r.tool_use_id);
@@ -487,6 +467,9 @@ export function useChat() {
           // Not JSON, treat as success
           parsed = { success: true, content: r.content };
         }
+
+        // Track success/failure for feedback loop
+        toolSuccesses.push(!isError);
 
         // Track recent tool names for pattern detection (last 10)
         const currentRecentTools = [...recentToolNames, ...completedTools.map(t => t.name)].slice(-10);
@@ -510,17 +493,24 @@ export function useChat() {
       });
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
 
-      // Track recent tool names for pattern detection
+      // Track recent tool names AND results for pattern detection
       const newRecentToolNames = [...recentToolNames, ...toolsToExecute.map(t => t.name)].slice(-10);
+      const newRecentResults = [...(recentToolNames as any).results || [], ...toolSuccesses].slice(-10);
 
-      // Add progress reflection at milestones (every 5 iterations, but not at soft limit points)
-      if (depth > 0 && depth % 5 === 0 && depth < 10) {
-        const reflectionPrompt = createProgressReflectionPrompt(depth, newRecentToolNames);
-        log.info(`Adding progress reflection at depth ${depth}`);
-        updatedHistory.push({
-          role: 'user',
-          content: reflectionPrompt,
-        });
+      // Only add feedback if truly stuck (not based on arbitrary depth)
+      const recentSuccesses = newRecentResults.filter((r: boolean) => r).length;
+      const recentFailures = newRecentResults.filter((r: boolean) => !r).length;
+      const consecutiveFailures = toolSuccesses.every(s => !s) && toolSuccesses.length > 0;
+
+      if (consecutiveFailures || (recentFailures >= 3 && recentSuccesses === 0)) {
+        const warning = createIterationWarning(depth, recentSuccesses, recentFailures);
+        if (warning) {
+          log.warn(`Stuck pattern detected: ${recentFailures} failures, ${recentSuccesses} successes`);
+          updatedHistory.push({
+            role: 'user',
+            content: warning,
+          });
+        }
       }
 
       // Create a NEW assistant message for the next iteration
