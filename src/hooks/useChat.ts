@@ -399,11 +399,22 @@ export function useChat() {
       }
 
       // Add tool results as user message
-      const toolResultBlocks = results.map(r => ({
-        type: 'tool_result',
-        tool_use_id: r.tool_use_id,
-        content: r.content,
-      }));
+      // Anthropic recommends setting is_error: true for failed tools
+      const toolResultBlocks = results.map(r => {
+        let isError = false;
+        try {
+          const parsed = JSON.parse(r.content);
+          isError = parsed.success === false || parsed.error;
+        } catch {
+          // Not JSON, assume success
+        }
+        return {
+          type: 'tool_result',
+          tool_use_id: r.tool_use_id,
+          content: r.content,
+          ...(isError ? { is_error: true } : {}),
+        };
+      });
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
 
       // Create a NEW assistant message for the next iteration
