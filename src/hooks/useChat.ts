@@ -159,16 +159,20 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Catch loops early - stop on 2nd identical consecutive call
-    // This prevents duplicate charts from being rendered
+    // LOOP DETECTION: Only for data-fetching tools that cause duplicate renders
+    // File operations (Read, Edit, Write, Glob, Grep, Bash) are allowed to repeat
+    const DATA_TOOLS = ['analytics', 'database_query', 'supabasefetch', 'query', 'search_products', 'get_inventory'];
     if (sessionToolHistory.length >= 2) {
       const last2 = sessionToolHistory.slice(-2);
       // 2 identical calls in a row = loop starting, stop immediately
       if (last2[0] === last2[1]) {
-        const toolName = last2[0].split(':')[0];
-        setError(`Loop detected: ${toolName} called twice with same params. Use /clear to reset.`);
-        updateLastMessage({ isStreaming: false });
-        return;
+        const toolName = last2[0].split(':')[0].toLowerCase();
+        // Only block loops for data tools, not file operations
+        if (DATA_TOOLS.includes(toolName)) {
+          setError(`Loop detected: ${toolName} called twice with same params. Use /clear to reset.`);
+          updateLastMessage({ isStreaming: false });
+          return;
+        }
       }
     }
 
