@@ -111,10 +111,11 @@ export function useTools(): UseToolsReturn {
         }
 
         // Check if this is a remote tool (MCP) or local tool
+        // MCP is optional - if not available, try executing locally
         if (isRemoteTool(tool.name)) {
-          // Execute via MCP (Whale data tools)
           const mcp = getMcpClient();
           if (mcp) {
+            // Execute via MCP (Whale data tools)
             try {
               const mcpResult = await mcp.callTool(tool.name, tool.input);
               // Parse and preserve structured data if it's JSON
@@ -130,6 +131,7 @@ export function useTools(): UseToolsReturn {
                 tool_use_id: tool.id,
                 content: JSON.stringify({ success: true, ...spreadData(resultData) }),
               });
+              continue;
             } catch (mcpError) {
               results.push({
                 tool_use_id: tool.id,
@@ -138,24 +140,19 @@ export function useTools(): UseToolsReturn {
                   error: mcpError instanceof Error ? mcpError.message : 'MCP tool execution failed',
                 }),
               });
+              continue;
             }
-          } else {
-            results.push({
-              tool_use_id: tool.id,
-              content: JSON.stringify({
-                success: false,
-                error: 'MCP client not initialized. Remote tools unavailable.',
-              }),
-            });
           }
-        } else {
-          // Execute locally (file system tools)
-          const result = await executeToolByName(tool.name, tool.input);
-          results.push({
-            tool_use_id: tool.id,
-            content: JSON.stringify(result),
-          });
+          // MCP not available - fall through to local execution
+          // This allows Wilson to work without MCP server
         }
+
+        // Local execution (or fallback when MCP unavailable)
+        const result = await executeToolByName(tool.name, tool.input);
+        results.push({
+          tool_use_id: tool.id,
+          content: JSON.stringify(result),
+        });
       } catch (error) {
         const errorResult: ToolResult = {
           success: false,

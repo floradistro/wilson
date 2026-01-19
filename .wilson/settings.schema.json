@@ -1,0 +1,121 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Wilson Settings",
+  "description": "Configuration schema for Wilson CLI assistant",
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "string",
+      "description": "Settings schema version"
+    },
+    "formatting": {
+      "type": "object",
+      "description": "Response formatting rules",
+      "properties": {
+        "style": {
+          "type": "string",
+          "enum": ["terminal", "markdown", "plain"],
+          "default": "terminal"
+        },
+        "maxLines": {
+          "type": "integer",
+          "minimum": 5,
+          "maximum": 100,
+          "default": 15
+        },
+        "maxBulletPoints": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 20,
+          "default": 5
+        },
+        "avoidPatterns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "preferTables": {
+          "type": "boolean",
+          "default": true
+        },
+        "statusFirst": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "description": "Tool permission rules (evaluated: deny > ask > allow)",
+      "properties": {
+        "allow": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tools allowed without prompting"
+        },
+        "ask": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tools requiring user confirmation"
+        },
+        "deny": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Tools blocked entirely (supports wildcards)"
+        }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Lifecycle hooks (shell commands)",
+      "properties": {
+        "PreToolUse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "matcher": { "type": "string" },
+              "command": { "type": "string" }
+            }
+          }
+        },
+        "PostToolUse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "matcher": { "type": "string" },
+              "command": { "type": "string" }
+            }
+          }
+        },
+        "PreResponse": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "command": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "description": "Context window management",
+      "properties": {
+        "maxTokens": {
+          "type": "integer",
+          "default": 180000
+        },
+        "compactionThreshold": {
+          "type": "integer",
+          "default": 150000
+        },
+        "preserveRecentTurns": {
+          "type": "integer",
+          "default": 10
+        }
+      }
+    }
+  }
+}

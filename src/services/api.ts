@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { getToolSchemas } from '../tools/index.js';
 import { getMcpClient } from './mcp.js';
 import { processHistoryForApi, getContextManagementConfig } from '../utils/context-manager.js';
+import { buildSystemPrompt, loadSettings } from '../lib/config-loader.js';
 import type { StoreInfo, ToolSchema } from '../types.js';
 
 // =============================================================================
@@ -33,7 +34,11 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     loopDepth,
   } = options;
 
-  // Read project context if available
+  // Load settings and build system prompt (Anthropic pattern)
+  const settings = loadSettings();
+  const systemPrompt = buildSystemPrompt(settings);
+
+  // Read project context if available (legacy - now handled by buildSystemPrompt)
   const projectContext = getProjectContext();
 
   // Only send local tools - backend already has MCP tools
@@ -61,25 +66,9 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     project_context: projectContext,
     // Server-side context management (safety net for token overflow)
     context_management: contextManagement,
-    style_instructions: `Terminal CLI. STRICT FORMAT RULES:
-
-NEVER USE: ** markers, emojis, "interactive charts", "visualization"
-
-METRICS (for data summaries):
-Summary:
-- Revenue: $123,456
-- Orders: 1,234
-- Avg Order: $50.29
-
-TABLES (for comparisons):
-| Period | Revenue |
-|--------|---------|
-| Today  | $50,000 |
-
-RULES:
-1. Bullet values = number ONLY
-2. No bold **, no decorations
-3. Plain text only`,
+    // System prompt built from hierarchical config (Anthropic pattern)
+    // Rules are injected BEFORE generation, not post-processed
+    style_instructions: systemPrompt,
   };
 
   // Create abort controller for timeout

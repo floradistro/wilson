@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
+import { execSync } from 'child_process';
+import { existsSync } from 'fs';
+import { join } from 'path';
 import { Chat } from './components/Chat.js';
 import { Spinner } from './components/Spinner.js';
 import { Login } from './components/Login.js';
@@ -7,6 +10,7 @@ import { TodoList } from './components/TodoList.js';
 import { AskUserPrompt } from './components/AskUserPrompt.js';
 import { PermissionPrompt } from './components/PermissionPrompt.js';
 import { StoreSelector } from './components/StoreSelector.js';
+import { ConfigView } from './components/ConfigView.js';
 import { Footer } from './components/Footer.js';
 import { useChat } from './hooks/useChat.js';
 import { useAuthStore } from './hooks/useAuthStore.js';
@@ -14,6 +18,7 @@ import { config } from './config.js';
 import { COLORS } from './theme/colors.js';
 import { SLASH_COMMANDS, KEYBOARD_SHORTCUTS, findSimilarCommands } from './help/commands.js';
 import { categorizeError, getStatusDuration } from './utils/errors.js';
+import { clearSettingsCache } from './lib/config-loader.js';
 import type { Flags, PendingQuestion, PendingPermission } from './types.js';
 
 interface AppProps {
@@ -22,7 +27,7 @@ interface AppProps {
   command?: string;
 }
 
-type ViewMode = 'chat' | 'help' | 'status';
+type ViewMode = 'chat' | 'help' | 'status' | 'config' | 'rules';
 type StatusType = 'info' | 'success' | 'warning' | 'error' | 'complex';
 type LoadingStage = 'initializing' | 'authenticating' | 'loading_stores';
 
@@ -252,6 +257,49 @@ export function App({ initialQuery, flags, command }: AppProps) {
         return true;
       }
 
+      // Config commands
+      case '/config':
+      case '/settings':
+        setViewMode('config');
+        return true;
+
+      case '/config edit':
+      case '/settings edit': {
+        const cwd = process.cwd();
+        const settingsPath = join(cwd, '.wilson', 'settings.json');
+        const editor = process.env.EDITOR || 'nano';
+        try {
+          execSync(`${editor} ${settingsPath}`, { stdio: 'inherit' });
+          clearSettingsCache(); // Reload after edit
+          showStatus('Settings reloaded', 'success');
+        } catch {
+          showStatus(`Open ${settingsPath} in your editor`, 'info');
+        }
+        return true;
+      }
+
+      case '/rules':
+      case '/memory':
+        setViewMode('rules');
+        return true;
+
+      case '/rules edit':
+      case '/memory edit': {
+        const cwd = process.cwd();
+        const rulesPath = existsSync(join(cwd, 'WILSON.md'))
+          ? join(cwd, 'WILSON.md')
+          : join(cwd, '.wilson', 'WILSON.md');
+        const editor = process.env.EDITOR || 'nano';
+        try {
+          execSync(`${editor} ${rulesPath}`, { stdio: 'inherit' });
+          clearSettingsCache(); // Reload after edit
+          showStatus('Rules reloaded', 'success');
+        } catch {
+          showStatus(`Open ${rulesPath} in your editor`, 'info');
+        }
+        return true;
+      }
+
       default:
         return false;
     }
@@ -380,6 +428,16 @@ export function App({ initialQuery, flags, command }: AppProps) {
         </Box>
       </Box>
     );
+  }
+
+  // Config view
+  if (viewMode === 'config') {
+    return <ConfigView mode="settings" />;
+  }
+
+  // Rules view
+  if (viewMode === 'rules') {
+    return <ConfigView mode="rules" />;
   }
 
   const handleSubmit = async (value: string) => {

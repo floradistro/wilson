@@ -7,7 +7,7 @@ export interface CommandDef {
   name: string;
   aliases: string[];
   description: string;
-  category: 'conversation' | 'navigation' | 'info' | 'session';
+  category: 'conversation' | 'navigation' | 'info' | 'session' | 'config';
 }
 
 export const SLASH_COMMANDS: CommandDef[] = [
@@ -24,6 +24,12 @@ export const SLASH_COMMANDS: CommandDef[] = [
   { name: 'tokens', aliases: [], description: 'Show token usage and cost', category: 'info' },
   { name: 'status', aliases: [], description: 'View connection status', category: 'info' },
   { name: 'help', aliases: ['?'], description: 'Show help', category: 'info' },
+
+  // Config
+  { name: 'config', aliases: ['settings'], description: 'View current settings', category: 'config' },
+  { name: 'config edit', aliases: ['settings edit'], description: 'Edit settings file', category: 'config' },
+  { name: 'rules', aliases: ['memory'], description: 'View WILSON.md rules', category: 'config' },
+  { name: 'rules edit', aliases: ['memory edit'], description: 'Edit WILSON.md', category: 'config' },
 
   // Session
   { name: 'logout', aliases: ['quit', 'exit'], description: 'Sign out', category: 'session' },

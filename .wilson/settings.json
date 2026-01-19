@@ -1,0 +1,43 @@
+{
+  "$schema": "./settings.schema.json",
+  "version": "1.0.0",
+
+  "formatting": {
+    "style": "terminal",
+    "maxLines": 15,
+    "maxBulletPoints": 5,
+    "avoidPatterns": ["**", "###", "emoji"],
+    "preferTables": true,
+    "statusFirst": true
+  },
+
+  "permissions": {
+    "allow": [
+      "read_inventory",
+      "read_sales",
+      "read_products",
+      "search_products"
+    ],
+    "ask": [
+      "write_inventory",
+      "create_order",
+      "modify_pricing"
+    ],
+    "deny": [
+      "delete_*",
+      "drop_*"
+    ]
+  },
+
+  "hooks": {
+    "PreToolUse": [],
+    "PostToolUse": [],
+    "PreResponse": []
+  },
+
+  "context": {
+    "maxTokens": 180000,
+    "compactionThreshold": 150000,
+    "preserveRecentTurns": 10
+  }
+}
