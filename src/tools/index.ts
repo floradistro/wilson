@@ -21,8 +21,7 @@ import { storeTools, storeSchemas } from './store.js';
 import { xcodeTools } from './xcode.js';
 // Project management tools (npm, git, bun)
 import { devTools } from './dev.js';
-// Dev server management
-import { devServerTools } from './devserver.js';
+// DevServer REMOVED - use Bash tool instead (auto-detects servers and runs in background)
 // Debug & feedback tools
 import { debugTools } from './debug.js';
 // Workflow & tool chaining
@@ -69,8 +68,7 @@ export const tools: Record<string, Tool> = {
   ...xcodeTools,
   // Project management tools (npm, git, bun)
   ...devTools,
-  // Dev server management
-  ...devServerTools,
+  // DevServer REMOVED - use Bash (auto-runs servers in background)
   // Debug & feedback tools
   ...debugTools,
   // Workflow & tool chaining
@@ -177,11 +175,8 @@ toolLookup['git_commit'] = tools.Git;
 toolLookup['bun'] = tools.Bun;
 toolLookup['bun_run'] = tools.Bun;
 
-// Dev server aliases
-toolLookup['devserver'] = tools.DevServer;
-toolLookup['dev_server'] = tools.DevServer;
-toolLookup['server'] = tools.DevServer;
-toolLookup['dev'] = tools.DevServer;
+// Dev server aliases REMOVED - use Bash tool instead
+// Example: Bash { command: "npm run dev" } - auto-runs in background
 
 // Debug tool aliases
 toolLookup['debug'] = tools.Debug;

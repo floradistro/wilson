@@ -484,46 +484,10 @@ export const BunSchema: ToolSchema = {
   },
 };
 
-export const DevServerSchema: ToolSchema = {
-  name: 'DevServer',
-  description: `Intelligent dev server management with system-wide discovery.
-
-ACTIONS:
-- list: List ALL running dev servers (managed + system-wide discovery)
-- discover: Detailed discovery of all dev servers with CPU/memory
-- ports: Show all ports in use (highlights dev ports 3000, 5173, etc.)
-- start: Start dev server (auto-detects framework)
-- stop: Stop a managed dev server
-- restart: Restart dev server (preserves port)
-- kill: Kill process by PID or kill all processes on a port
-- logs: Get server output (managed servers only)
-- status: Check if server is running
-- check-change: Check if file change needs restart vs hot-reload
-- detect: Detect framework and recommended commands
-
-SYSTEM-WIDE VISIBILITY:
-- Discovers ALL node/bun/vite/next processes running
-- Shows working directory, port, CPU%, memory%
-- Works for servers started by Bash, manually, or other tools
-
-HOT RELOAD vs RESTART:
-- Component changes → Hot reload (automatic)
-- Config changes (next.config.js, vite.config.ts) → Restart needed
-- package.json, .env changes → Restart needed`,
-  parameters: {
-    type: 'object',
-    properties: {
-      action: { type: 'string', description: 'Action: list, discover, ports, start, stop, restart, kill, logs, status, check-change, detect' },
-      path: { type: 'string', description: 'Project directory (default: cwd)' },
-      id: { type: 'string', description: 'Server ID (for stop/restart/logs)' },
-      pid: { type: 'number', description: 'Process ID (for kill action)' },
-      command: { type: 'string', description: 'Custom start command (default: auto-detected)' },
-      port: { type: 'number', description: 'Port number - for start (default: framework default), or for kill (kills all processes on that port)' },
-      file: { type: 'string', description: 'File path (for check-change action)' },
-    },
-    required: ['action'],
-  },
-};
+// DevServer tool REMOVED - use Bash tool instead
+// The Bash tool auto-detects dev servers and runs them in background
+// Example: Bash { command: "npm run dev" } - auto-runs in background
+// To kill a port: Bash { command: "lsof -ti:3000 | xargs kill -9" }
 
 export const DebugSchema: ToolSchema = {
   name: 'Debug',
@@ -594,8 +558,7 @@ export const ALL_SCHEMAS: ToolSchema[] = [
   NpmSchema,
   GitSchema,
   BunSchema,
-  // Dev server management
-  DevServerSchema,
+  // DevServer REMOVED - use Bash instead (auto-detects servers)
   // Debug & feedback
   DebugSchema,
 ];

@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import type { Message, ToolCall, ToolData, Todo, PendingQuestion, PendingPermission } from '../types.js';
 import { useStream, type StreamEvent } from './useStream.js';
 import { useTools } from './useTools.js';
@@ -6,6 +6,39 @@ import { sendChatRequest } from '../services/api.js';
 import { compactConversation } from '../utils/context.js';
 import { truncateAssistantContent } from '../utils/context-manager.js';
 import { log } from '../utils/logger.js';
+
+// =============================================================================
+// Loop Prevention - Anthropic Best Practices
+// =============================================================================
+// 1. Track tool calls to detect duplicates
+// 2. Hard limit on iterations (10 max)
+// 3. Detect consecutive identical tools
+// 4. Natural termination when Claude produces text without tools
+
+interface ToolCallSignature {
+  name: string;
+  inputHash: string;
+}
+
+function hashToolInput(input: unknown): string {
+  // Create a simple hash of tool input for deduplication
+  const str = JSON.stringify(input || {});
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return hash.toString(36);
+}
+
+function createToolSignature(name: string, input: unknown): ToolCallSignature {
+  return { name: name.toLowerCase(), inputHash: hashToolInput(input) };
+}
+
+function signaturesMatch(a: ToolCallSignature, b: ToolCallSignature): boolean {
+  return a.name === b.name && a.inputHash === b.inputHash;
+}
 
 interface ToolCallbacks {
   onAskUser?: (question: PendingQuestion) => Promise<string>;
@@ -119,6 +152,9 @@ export function useChat() {
     // Loop tracking from backend (passed back on continuation)
     toolCallCount?: number;
     loopDepth?: number;
+    // Tool deduplication - track all tool calls in this turn
+    toolHistory?: ToolCallSignature[];
+    lastToolSignature?: ToolCallSignature;
   }) {
     const {
       userMessage,
@@ -131,21 +167,20 @@ export function useChat() {
       depth,
       toolCallCount,
       loopDepth,
+      toolHistory = [],
+      lastToolSignature,
     } = params;
 
-    // LOOP PREVENTION - Anthropic's recommended approach:
-    // 1. Tool results include clear "[TOOL COMPLETE]" prefix
-    // 2. Failed tools get is_error: true
-    // 3. cache_control marks results as processed
-    // 4. Depth limit as ultimate safety net
+    // ==========================================================================
+    // LOOP PREVENTION - Anthropic Best Practices
+    // ==========================================================================
+    // Claude Code approach: NO artificial iteration limits
+    // Instead, rely on:
+    // 1. Tool call deduplication (same tool + same params = blocked)
+    // 2. Consecutive identical tool detection (immediate stop)
+    // 3. Natural termination when Claude produces text without tools
     //
-    // Reduced from 30 to 15 - if Claude needs more than 15 iterations, something is wrong.
-
-    if (depth > 15) {
-      setError('Maximum iterations reached (15). Use /clear to reset.');
-      updateLastMessage({ isStreaming: false });
-      return;
-    }
+    // Only stop for truly pathological cases (50+ iterations = something broken)
 
     // Compact conversation if approaching context limit (Claude Code style)
     const { messages: compactedHistory, wasCompacted, tokensAfter } = compactConversation(conversationHistory);
@@ -269,10 +304,55 @@ export function useChat() {
 
     // Execute pending tools if any
     if (pendingTools && pendingTools.length > 0) {
-      setToolCallCount(prev => prev + pendingTools!.length);
+      // ========================================================================
+      // LOOP PREVENTION: Tool Deduplication
+      // ========================================================================
+      const newToolHistory = [...toolHistory];
+      let newLastToolSignature: ToolCallSignature | undefined;
+      const toolsToExecute: typeof pendingTools = [];
+      const blockedTools: string[] = [];
+
+      for (const tool of pendingTools) {
+        const signature = createToolSignature(tool.name, tool.input);
+
+        // Check 1: Is this tool identical to the LAST tool called? (consecutive duplicate)
+        if (lastToolSignature && signaturesMatch(signature, lastToolSignature)) {
+          log.warn(`Loop prevention: blocked consecutive duplicate tool call: ${tool.name}`);
+          blockedTools.push(`${tool.name} (consecutive duplicate)`);
+          continue;
+        }
+
+        // Check 2: Has this exact tool+params been called before in this turn?
+        const isDuplicate = newToolHistory.some(prev => signaturesMatch(prev, signature));
+        if (isDuplicate) {
+          log.warn(`Loop prevention: blocked duplicate tool call: ${tool.name}`);
+          blockedTools.push(`${tool.name} (already called with same params)`);
+          continue;
+        }
+
+        // Tool is allowed - add to history and execute list
+        newToolHistory.push(signature);
+        newLastToolSignature = signature;
+        toolsToExecute.push(tool);
+      }
+
+      // If ALL tools were blocked, stop the loop
+      if (toolsToExecute.length === 0) {
+        log.warn('Loop prevention: all requested tools were duplicates, stopping loop');
+        updateLastMessage({
+          content: iterationText + (blockedTools.length > 0
+            ? `\n\n[Loop prevented: ${blockedTools.join(', ')}]`
+            : ''),
+          toolCalls: accumulatedTools,
+          isStreaming: false,
+        });
+        return;
+      }
+
+      setToolCallCount(prev => prev + toolsToExecute.length);
 
       // Mark tools as running
-      const runningTools: ToolCall[] = pendingTools.map(t => ({
+      const runningTools: ToolCall[] = toolsToExecute.map(t => ({
         id: t.id,
         name: t.name,
         input: t.input,
@@ -285,8 +365,8 @@ export function useChat() {
         toolCalls: allToolsSoFar,
       });
 
-      // Execute tools
-      const results = await executeTools(pendingTools, {
+      // Execute tools (only non-duplicate ones)
+      const results = await executeTools(toolsToExecute, {
         onTodoUpdate: setTodos,
         onAskUser: callbacks?.onAskUser,
         onPermissionRequest: callbacks?.onPermissionRequest,
@@ -295,7 +375,7 @@ export function useChat() {
 
       // Capture tool results for chart rendering (client-executed tools)
       // This fills toolDataResults for MCP tools since backend doesn't send tool_result events for them
-      for (const tool of pendingTools) {
+      for (const tool of toolsToExecute) {
         const result = results.find(r => r.tool_use_id === tool.id);
         if (result) {
           try {
@@ -315,15 +395,18 @@ export function useChat() {
         }
       }
 
-      // Mark tools as completed and add "do not repeat" hint for analytics
+      // Mark tools as completed
+      // Check for terminal actions (like dev server start) that should end the loop
+      let hasTerminalAction = false;
+
       const completedTools: ToolCall[] = runningTools.map(tc => {
         const result = results.find(r => r.tool_use_id === tc.id);
         if (result) {
           try {
             const parsed = JSON.parse(result.content);
-            // Add hint to analytics results to prevent repeat calls
-            if (tc.name.toLowerCase() === 'analytics' && parsed.success) {
-              parsed._hint = 'Data complete. Summarize these results for the user. Do not call analytics again with these parameters.';
+            // Check if this is a terminal action (e.g., dev server started)
+            if (parsed._terminal) {
+              hasTerminalAction = true;
             }
             return {
               ...tc,
@@ -392,6 +475,14 @@ export function useChat() {
       });
       updatedHistory.push({ role: 'user', content: toolResultBlocks });
 
+      // If a terminal action completed (like dev server started), STOP the loop
+      // This is the key fix - don't continue asking Claude what to do next
+      if (hasTerminalAction) {
+        log.info('Terminal action completed (dev server), stopping loop');
+        // Message is already finalized above, just return
+        return;
+      }
+
       // Create a NEW assistant message for the next iteration
       const nextAssistantMessage: Message = {
         id: crypto.randomUUID(),
@@ -404,6 +495,7 @@ export function useChat() {
       setMessages(prev => [...prev, nextAssistantMessage]);
 
       // Continue agent loop with accumulated conversation
+      // Pass tool history for deduplication across iterations
       await runAgentLoop({
         userMessage,
         conversationHistory: updatedHistory,
@@ -415,6 +507,9 @@ export function useChat() {
         depth: depth + 1,
         toolCallCount: backendToolCallCount,
         loopDepth: backendLoopDepth,
+        // Pass tool history for loop prevention
+        toolHistory: newToolHistory,
+        lastToolSignature: newLastToolSignature,
       });
     } else {
       // No tools - finalize message

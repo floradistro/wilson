@@ -589,10 +589,10 @@ export const debugTool: Tool = {
         return {
           success: true,
           content: JSON.stringify({
-            message: 'File watching should be handled by the dev server.',
-            tip: 'Use DevServer tool with hot-reload for automatic error detection.',
+            message: 'File watching is handled by the dev server automatically.',
+            tip: 'Use Bash to start dev server with hot-reload.',
             alternatives: [
-              'DevServer action=logs - Get current server logs',
+              'Bash command="npm run dev" - Start dev server (auto-background)',
               'Debug action=run-check command="npm run build" - Check for build errors',
               'Debug action=read-log path="./logs/error.log" - Read error logs',
             ],

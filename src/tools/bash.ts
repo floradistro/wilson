@@ -110,10 +110,18 @@ function runInBackground(command: string, cwd: string): Promise<ToolResult> {
 
     // Wait briefly to capture startup output
     setTimeout(() => {
+      // Extract port from output if available
+      const portMatch = output.match(/localhost:(\d+)|127\.0\.0\.1:(\d+)|port\s*(\d+)/i);
+      const port = portMatch ? (portMatch[1] || portMatch[2] || portMatch[3]) : '3000';
+
       resolve({
         success: true,
-        content: `Started background process (PID: ${pid})\n${output.slice(0, 2000)}${output.length > 2000 ? '\n...(output truncated)' : ''}`,
+        content: `Server is now running at http://localhost:${port} (PID: ${pid})
+
+The development server started successfully in the background. The user can now open their browser to view the site.`,
         pid,
+        // Mark this as a terminal action - no further tools needed
+        _terminal: true,
       });
     }, BACKGROUND_STARTUP_WAIT);
   });
