@@ -159,32 +159,36 @@ export function useChat() {
       sessionToolHistory = [],
     } = params;
 
-    // LOOP DETECTION: Use session-level tool history (persists across iterations)
-    // sessionToolHistory contains "toolName:paramHash" strings to detect same calls
-    const recentCalls = sessionToolHistory.slice(-15);
+    // LOOP DETECTION: Detect actual loops, not legitimate multi-calls
+    // sessionToolHistory contains "toolName:paramHash" strings
 
-    // Check for exact duplicate calls (same tool + same params) - 3 identical = loop
-    if (recentCalls.length >= 3) {
-      const last3 = recentCalls.slice(-3);
-      if (last3[0] === last3[1] && last3[1] === last3[2]) {
-        const toolName = last3[0].split(':')[0];
-        setError(`Loop detected: ${toolName} called 3 times with same parameters. Use /clear to reset.`);
+    // Only check for EXACT duplicate calls (same tool + same params) in a row
+    // This catches true loops where AI keeps calling same thing repeatedly
+    if (sessionToolHistory.length >= 4) {
+      const last4 = sessionToolHistory.slice(-4);
+      // All 4 must be identical (same tool, same params) to be a loop
+      if (last4[0] === last4[1] && last4[1] === last4[2] && last4[2] === last4[3]) {
+        const toolName = last4[0].split(':')[0];
+        setError(`Loop detected: ${toolName} called 4 times with identical parameters. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
         return;
       }
     }
 
-    // Check for excessive calls to same tool (even with different params) - 6+ = likely loop
-    const toolNameCounts = recentCalls.reduce((acc, call) => {
-      const name = call.split(':')[0];
-      acc[name] = (acc[name] || 0) + 1;
+    // Count unique vs duplicate calls - loops have many duplicates
+    // Legitimate use: analytics(summary), analytics(trend), analytics(by_location) = 3 unique
+    // Loop: analytics(summary), analytics(summary), analytics(summary) = 3 duplicate
+    const callCounts = sessionToolHistory.reduce((acc, call) => {
+      acc[call] = (acc[call] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
-    const maxToolCalls = Math.max(...Object.values(toolNameCounts), 0);
-    if (maxToolCalls >= 6) {
-      const problematicTool = Object.entries(toolNameCounts).find(([_, count]) => count >= 6)?.[0];
-      setError(`Loop detected: ${problematicTool} called ${maxToolCalls} times. Use /clear to reset.`);
+    const maxDuplicates = Math.max(...Object.values(callCounts), 0);
+    if (maxDuplicates >= 5) {
+      // Same exact call 5+ times = definitely a loop
+      const problematicCall = Object.entries(callCounts).find(([_, count]) => count >= 5)?.[0];
+      const toolName = problematicCall?.split(':')[0] || 'tool';
+      setError(`Loop detected: ${toolName} called ${maxDuplicates} times with same parameters. Use /clear to reset.`);
       updateLastMessage({ isStreaming: false });
       return;
     }
