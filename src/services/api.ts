@@ -53,10 +53,9 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
   // Read project context if available (legacy - now handled by buildSystemPrompt)
   const projectContext = getProjectContext();
 
-  // Send only LOCAL tools (file ops, bash, etc.) to the backend
-  // The backend will add relevant DATA tools via semantic search
-  // This reduces token usage by ~90%
-  const localOnlyTools = getToolSchemas(); // Local tools only, no MCP
+  // Send ALL tools (local + MCP) to the backend
+  // This includes file ops, bash, store tools, AND MCP data tools
+  const allTools = getAllToolSchemas();
 
   // Process history to truncate large tool inputs/outputs (client-side optimization)
   const processedHistory = processHistoryForApi(conversationHistory);
@@ -73,7 +72,7 @@ export async function sendChatRequest(options: SendChatOptions): Promise<Respons
     platform: process.platform,
     client: 'cli',
     format_hint: 'terminal',
-    local_tools: localOnlyTools,
+    local_tools: allTools,
     // Loop tracking - backend uses these to enforce limits
     tool_call_count: toolCallCount,
     loop_depth: loopDepth,

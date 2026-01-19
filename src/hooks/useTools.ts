@@ -133,18 +133,28 @@ export function useTools(): UseToolsReturn {
               });
               continue;
             } catch (mcpError) {
+              // MCP execution failed - return clear error
               results.push({
                 tool_use_id: tool.id,
                 content: JSON.stringify({
                   success: false,
-                  error: mcpError instanceof Error ? mcpError.message : 'MCP tool execution failed',
+                  error: `MCP tool '${tool.name}' failed: ${mcpError instanceof Error ? mcpError.message : 'Unknown error'}`,
                 }),
               });
               continue;
             }
+          } else {
+            // MCP not connected - return clear error for remote tools
+            // Don't fall through to local execution for tools that REQUIRE MCP
+            results.push({
+              tool_use_id: tool.id,
+              content: JSON.stringify({
+                success: false,
+                error: `Tool '${tool.name}' requires MCP server but MCP is not connected. Please restart the app.`,
+              }),
+            });
+            continue;
           }
-          // MCP not available - fall through to local execution
-          // This allows Wilson to work without MCP server
         }
 
         // Local execution (or fallback when MCP unavailable)

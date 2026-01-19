@@ -341,18 +341,37 @@ export function getMcpClient(): McpClient | null {
   return mcpClientInstance;
 }
 
+// Cache of local tool names for fast lookup
+let localToolNamesCache: Set<string> | null = null;
+
 /**
  * Check if a tool should be executed via MCP (remote) vs locally
  */
 export function isRemoteTool(toolName: string): boolean {
-  // Local tools that execute on the client
-  const localTools = new Set([
-    'Read', 'Write', 'Edit', 'Bash', 'Glob', 'Grep', 'LS',
-    'TodoWrite', 'AskUserQuestion', 'Peek', 'Sum', 'Scan',
-    'Search', 'Index', 'Symbol', 'Multi',
-  ]);
+  // Build cache on first call - includes ALL local tools from registry
+  if (!localToolNamesCache) {
+    // Import dynamically to avoid circular dependency at module load
+    try {
+      const { tools } = require('../tools/index.js');
+      localToolNamesCache = new Set(Object.keys(tools).map(name => name.toLowerCase()));
+    } catch {
+      // Fallback to hardcoded list if import fails
+      localToolNamesCache = new Set([
+        'read', 'write', 'edit', 'bash', 'glob', 'grep', 'ls',
+        'todowrite', 'askuserquestion', 'askuser', 'peek', 'sum', 'scan',
+        'search', 'index', 'symbol', 'multi', 'fetch', 'supabasefetch',
+        'env', 'xcodebuild', 'simctl', 'xcrun', 'swiftpackage', 'xcodeselect',
+        'npm', 'git', 'bun', 'devserver', 'debug', 'workflow',
+      ]);
+    }
+    // Also add special tools that are handled in useTools
+    localToolNamesCache.add('todowrite');
+    localToolNamesCache.add('askuser');
+    localToolNamesCache.add('askuserquestion');
+  }
 
-  return !localTools.has(toolName);
+  // A tool is remote if it's NOT in our local registry
+  return !localToolNamesCache.has(toolName.toLowerCase());
 }
 
 /**

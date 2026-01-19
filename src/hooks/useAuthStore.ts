@@ -67,8 +67,8 @@ export function useAuthStore(): UseAuthStoreReturn {
       if (storeId) {
         createMcpClient({ storeId })
           .then(() => prefetchMcpTools())
-          .catch(() => {
-            // Silent fail - MCP will retry on first tool call
+          .catch((err) => {
+            console.error('[LOGIN] MCP initialization failed:', err?.message || err);
           });
         // Fetch menu config for this store
         fetchMenuConfig(storeId, token).catch(() => {});
@@ -126,9 +126,15 @@ export function useAuthStore(): UseAuthStoreReturn {
       bootstrapWilson(state.accessToken).catch(() => {});
       // Initialize MCP client and prefetch tools for chart rendering
       createMcpClient({ storeId: state.storeId })
-        .then(() => prefetchMcpTools())
-        .catch(() => {
-          // Silent fail - MCP will retry on first tool call
+        .then(() => {
+          // console.log('[AUTH] MCP client connected');
+          return prefetchMcpTools();
+        })
+        .then(() => {
+          // console.log('[AUTH] MCP tools prefetched');
+        })
+        .catch((err) => {
+          console.error('[AUTH] MCP initialization failed:', err?.message || err);
         });
       // Auto-refresh stores on startup to catch any changes
       authStore.refreshStoresAndLocations().catch(() => {});
