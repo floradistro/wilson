@@ -185,8 +185,15 @@ export function useChat() {
     }, {} as Record<string, number>);
 
     for (const [toolName, count] of Object.entries(toolNameCounts)) {
-      // Analytics gets higher limit since it legitimately needs multiple query_types
-      const limit = toolName.toLowerCase() === 'analytics' ? 6 : 8;
+      // Different limits based on tool type:
+      // - Analytics: 4 calls max (summary, trend, by_location + 1 buffer)
+      // - Read/Grep/Glob: 10 calls (exploration tools need more)
+      // - Others: 6 calls
+      const name = toolName.toLowerCase();
+      let limit = 6;
+      if (name === 'analytics') limit = 4;
+      else if (['read', 'grep', 'glob', 'ls'].includes(name)) limit = 10;
+
       if (count >= limit) {
         setError(`Loop detected: ${toolName} called ${count} times. Use /clear to reset.`);
         updateLastMessage({ isStreaming: false });
