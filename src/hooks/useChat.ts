@@ -7,29 +7,6 @@ import { compactConversation } from '../utils/context.js';
 import { truncateAssistantContent } from '../utils/context-manager.js';
 import { log } from '../utils/logger.js';
 
-// Throttle function for streaming updates
-function createThrottle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
-  let lastCall = 0;
-  let timeout: ReturnType<typeof setTimeout> | null = null;
-  let lastArgs: Parameters<T> | null = null;
-
-  return ((...args: Parameters<T>) => {
-    const now = Date.now();
-    lastArgs = args;
-
-    if (now - lastCall >= ms) {
-      lastCall = now;
-      fn(...args);
-    } else if (!timeout) {
-      timeout = setTimeout(() => {
-        timeout = null;
-        lastCall = Date.now();
-        if (lastArgs) fn(...lastArgs);
-      }, ms - (now - lastCall));
-    }
-  }) as T;
-}
-
 interface ToolCallbacks {
   onAskUser?: (question: PendingQuestion) => Promise<string>;
   onPermissionRequest?: (permission: PendingPermission) => Promise<boolean>;
@@ -206,22 +183,16 @@ export function useChat() {
     // Tools being streamed (for immediate UI feedback before tools_pending)
     const streamingTools: ToolCall[] = [];
 
-    // Throttled update for streaming text (50ms) - balance between smoothness and responsiveness
-    // Lower values = more responsive but more CPU, higher = smoother but laggy feel
-    const throttledUpdate = createThrottle((text: string, chars: number) => {
-      setStreamingChars(chars);
-      updateLastMessage({ content: text });
-    }, 50);
-
-    // Process stream
+    // Process stream - update immediately for responsive feel
     for await (const event of processStream(response)) {
       switch (event.type) {
         case 'text':
           if (event.text) {
             iterationText += event.text;
             charCount += event.text.length;
-            // Only show current iteration's text - don't accumulate
-            throttledUpdate(iterationText, charCount);
+            // Update immediately - no throttling for text streaming
+            setStreamingChars(charCount);
+            updateLastMessage({ content: iterationText });
           }
           break;
 
@@ -297,8 +268,7 @@ export function useChat() {
       }
     }
 
-    // Final flush of any pending throttled updates - only show this iteration's text
-    setStreamingChars(charCount);
+    // Final update after stream completes
     updateLastMessage({ content: iterationText });
 
     // Execute pending tools if any
