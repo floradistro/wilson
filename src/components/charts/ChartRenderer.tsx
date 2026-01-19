@@ -331,10 +331,10 @@ function autoDetectChart(
     prettyTitle = 'Revenue by Category';
   } else if (queryType === 'by_product') {
     prettyTitle = 'Top Products';
-  } else if (/category/i.test(lkLower)) {
+  } else if (/category_name/i.test(lkLower)) {
     // Auto-detect category breakdown from Database_query results
     prettyTitle = 'Revenue by Category';
-  } else if (/product/i.test(lkLower)) {
+  } else if (/product_name/i.test(lkLower)) {
     // Auto-detect product breakdown from Database_query results
     prettyTitle = 'Top Products by Revenue';
   } else if (!prettyTitle) {
@@ -378,7 +378,8 @@ function detectChartType(
 
   // Bar chart for category/product breakdowns (most common business chart)
   // These benefit from bar chart's ability to show labels clearly
-  if (/category|product|name/i.test(lk)) {
+  // Note: Don't match location_name - that should stay as table
+  if (/category_name|product_name/i.test(lk)) {
     return 'bar';
   }
 
