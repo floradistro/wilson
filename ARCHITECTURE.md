@@ -339,6 +339,93 @@ Wilson checks multiple sources (in order):
 | `refresh_store_prefetch(store_id)` | Manual/cron | Update cached data |
 | `refresh_all_stores_prefetch()` | Cron (15min) | Batch refresh all stores |
 
+## Agentic Loop & Tool Use Best Practices
+
+Wilson implements an agentic loop pattern following [Anthropic's best practices](https://www.anthropic.com/engineering/claude-code-best-practices).
+
+### Loop Detection Strategy
+
+**Philosophy:** Detect actual loops (repetition), not arbitrary limits.
+
+```typescript
+// CORRECT: Only catch TRUE loops - identical consecutive calls
+if (sessionToolHistory.length >= 3) {
+  const last3 = sessionToolHistory.slice(-3);
+  if (last3[0] === last3[1] && last3[1] === last3[2]) {
+    // Same tool + same params 3x in a row = stuck loop
+    setError('Loop detected');
+  }
+}
+
+// WRONG: Arbitrary limits that block legitimate use
+if (toolCallCount >= 6) { ... }  // DON'T DO THIS
+```
+
+**Why no arbitrary limits:**
+- `analytics(summary)` → `analytics(trend)` → `analytics(by_location)` is legitimate
+- Limits like "max 6 calls" block valid multi-view requests
+- The AI should be allowed to call as many DIFFERENT tools as needed
+
+### Preventing Repeated Tool Calls
+
+Based on Anthropic's documentation, we use three strategies:
+
+**1. Tool Description (most important)**
+```json
+{
+  "name": "analytics",
+  "description": "... IMPORTANT: Call each query_type AT MOST ONCE per user request. After receiving results, summarize them - do NOT call analytics again with the same parameters."
+}
+```
+
+**2. Tool Result Hints**
+```typescript
+// Add hint to tool results telling Claude to stop
+if (tc.name === 'analytics' && parsed.success) {
+  parsed._hint = 'Data complete. Summarize these results. Do not call analytics again with these parameters.';
+}
+```
+
+**3. System Prompt**
+```
+CRITICAL RULE: After calling a tool and receiving results, you MUST summarize the results and respond to the user. Do NOT call the same tool again with the same parameters.
+```
+
+### Tool Call Tracking
+
+Track tool calls with content hashes to detect duplicates:
+
+```typescript
+const newToolEntries = completedTools.map(t => {
+  const inputStr = JSON.stringify(t.input || {});
+  const hash = inputStr.length > 50 ? inputStr.slice(0, 50) : inputStr;
+  return `${t.name}:${hash}`;
+});
+// e.g., "analytics:{"query_type":"summary","period":"la"
+```
+
+This allows:
+- Same tool with different params ✅
+- Same tool with same params 3x ❌
+
+### Safety Net (not primary defense)
+
+A high depth limit (50) catches runaway agents:
+
+```typescript
+if (depth > 50) {
+  setError('Maximum tool iterations reached');
+}
+```
+
+This should NEVER trigger in normal use - it's only for catastrophic failures.
+
+### References
+
+- [Anthropic Tool Use Implementation](https://platform.claude.com/docs/en/agents-and-tools/tool-use/implement-tool-use)
+- [Claude Code Best Practices](https://www.anthropic.com/engineering/claude-code-best-practices)
+- [Building Agents with Claude Agent SDK](https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk)
+
 ## Conclusion
 
 This architecture ensures:
@@ -347,5 +434,6 @@ This architecture ensures:
 3. **Security is enforced via RLS, not client-side checks**
 4. **Offline mode works with cached data**
 5. **Scalable to thousands of stores**
+6. **Agentic loops follow Anthropic best practices**
 
 Wilson "just works" out of the box.
